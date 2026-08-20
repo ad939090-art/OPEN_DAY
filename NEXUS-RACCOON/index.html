@@ -231,72 +231,28 @@ vx:0.35
 
 
 // =====================================================
-// CONTROLLER
-// =====================================================
-//
-// TEMPORARY VERCEL VERSION
-//
-// The ESP8266 controller will be connected here later.
-// For now we use keyboard controls so we can test the
-// game on Vercel independently.
-//
-// Arrow Left  = Move left
-// Arrow Right = Move right
-// Space       = Jump / Laser
-// Enter       = Start / Fly
-//
+// ESP8266 CONTROLLER
 // =====================================================
 
 function readController(){
 
-// Cloud/ESP8266 controller will be connected here later.
+fetch("http://192.168.43.220/controller")
+
+.then(r => r.json())
+
+.then(data => {
+
+direction = data.direction;
+jump = data.jump;
+fly = data.fly;
+
+})
+
+.catch(()=>{});
 
 }
 
 setInterval(readController,60);
-
-
-// =====================================================
-// KEYBOARD TEST CONTROLS
-// =====================================================
-
-document.addEventListener("keydown", function(e){
-
-if(e.key === "ArrowLeft"){
-direction = "LEFT";
-}
-
-if(e.key === "ArrowRight"){
-direction = "RIGHT";
-}
-
-if(e.key === " "){
-jump = true;
-e.preventDefault();
-}
-
-if(e.key === "Enter"){
-fly = true;
-}
-
-});
-
-
-document.addEventListener("keyup", function(e){
-
-if(e.key === "ArrowLeft" || e.key === "ArrowRight"){
-direction = "CENTER";
-}
-
-if(e.key === " "){
-jump = false;
-}
-
-if(e.key === "Enter"){
-fly = false;
-}
-
-});
 
 
 // =====================================================
@@ -401,7 +357,7 @@ showMessage(
 
 "💀 GAME OVER<br><br>"+
 "SCORE: "+score+
-"<br><br>Press ENTER to restart"
+"<br><br>Press D4 to restart"
 
 );
 
@@ -428,11 +384,6 @@ player.y=80;
 
 function update(){
 
-
-// =====================================================
-// START SCREEN
-// =====================================================
-
 if(state==="START"){
 
 if(fly && !previousFly){
@@ -447,10 +398,6 @@ return;
 
 }
 
-
-// =====================================================
-// GAME OVER
-// =====================================================
 
 if(state==="GAMEOVER"){
 
@@ -467,10 +414,6 @@ return;
 
 }
 
-
-// =====================================================
-// VICTORY
-// =====================================================
 
 if(state==="VICTORY"){
 
@@ -489,7 +432,7 @@ return;
 
 
 // =====================================================
-// NORMAL MOVEMENT
+// MOVEMENT
 // =====================================================
 
 if(direction==="LEFT"){
@@ -558,9 +501,6 @@ player.vx*=0.55;
 }
 
 player.vy=-0.15;
-
-
-// Flight expires after 10 seconds
 
 if(flightTime<=0){
 
@@ -755,7 +695,7 @@ hitPlayer();
 
 
 // =====================================================
-// ADD ENEMIES GRADUALLY
+// ADD ENEMIES
 // =====================================================
 
 if(
@@ -856,7 +796,7 @@ state="BOSS";
 showMessage(
 
 "👑 FINAL BOSS<br><br>"+
-"Press SPACE to enter"
+"Press D1 to enter"
 
 );
 
@@ -924,7 +864,7 @@ showMessage(
 "<br><br>"+
 "SCORE: "+score+
 "<br><br>"+
-"Press ENTER"
+"Press D4"
 
 );
 
@@ -984,8 +924,6 @@ document.getElementById("flight").innerText="LOCKED";
 
 function drawBackground(){
 
-// GRASS
-
 if(environment===0){
 
 ctx.fillStyle="#63c9ff";
@@ -1008,9 +946,6 @@ ctx.fillRect(25,85,38,25);
 ctx.fillRect(255,90,40,25);
 
 }
-
-
-// ICEBERG
 
 else if(environment===1){
 
@@ -1037,9 +972,6 @@ ctx.fillStyle="#51b9dc";
 ctx.fillRect(0,155,320,25);
 
 }
-
-
-// MOON
 
 else if(environment===2){
 
@@ -1071,9 +1003,6 @@ ctx.fillStyle="#777";
 ctx.fillRect(0,150,320,30);
 
 }
-
-
-// VOLCANO
 
 else{
 
@@ -1409,8 +1338,8 @@ ctx.fillStyle="#ffe66d";
 ctx.font="12px monospace";
 
 ctx.fillText(
-"PRESS ENTER TO START",
-85,
+"PRESS D4 TO START",
+95,
 155
 );
 
@@ -1492,7 +1421,6 @@ draw();
 requestAnimationFrame(loop);
 
 }
-
 
 updateHUD();
 
