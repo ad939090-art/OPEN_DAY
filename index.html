@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<title>NEXUS RACCOON</title>
+
+<style>
+
+*{
+box-sizing:border-box;
+}
+
+body{
+margin:0;
+background:#101018;
+color:white;
+font-family:monospace;
+text-align:center;
+overflow:hidden;
+}
+
+#top{
+height:42px;
+padding:6px;
+font-size:14px;
+font-weight:bold;
+}
+
+#game{
+width:96vw;
+max-width:720px;
+border:5px solid #222;
+image-rendering:pixelated;
+}
+
+#controls{
+font-size:11px;
+margin-top:5px;
+}
+
+#message{
+position:fixed;
+left:50%;
+top:50%;
+transform:translate(-50%,-50%);
+background:#151515;
+border:4px solid white;
+padding:20px;
+display:none;
+font-size:17px;
+z-index:10;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="top">
+
+🦝 NEXUS
+&nbsp; 💰 <span id="score">0</span>
+&nbsp; ❤️ <span id="lives">3</span>
+&nbsp; 🍕 <span id="pizza">0</span>/3
+&nbsp; ✈️ <span id="flight">LOCKED</span>
+
+</div>
+
+<canvas id="game" width="320" height="180"></canvas>
+
+<div id="controls">
+
+🕹️ MOVE
+&nbsp;&nbsp;
+🔵 D1 = JUMP / LASER
+&nbsp;&nbsp;
+🔴 D4 = START / FLY
+
+</div>
+
+<div id="message"></div>
+
+
+<script>
+
+// =====================================================
+// CANVAS
+// =====================================================
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+ctx.imageSmoothingEnabled = false;
+
+
+// =====================================================
+// GAME STATE
+// =====================================================
+
+let state = "START";
+
+let direction = "CENTER";
+
+let jump = false;
+let fly = false;
+
+let previousJump = false;
+let previousFly = false;
+
+let score = 0;
+let lives = 3;
+
+let pizzaCount = 0;
+
+let flightUnlocked = false;
+let flying = false;
+let flightTime = 0;
+
+let cameraX = 0;
+
+let level = 1;
+let environment = 0;
+
+let bossActive = false;
+let bossHealth = 100;
+let bossTimer = 0;
+
+let laserActive = false;
+
+
+// =====================================================
+// PLAYER
+// =====================================================
+
+let player = {
+
+x:35,
+y:100,
+
+w:17,
+h:23,
+
+vx:0,
+vy:0,
+
+onGround:false
+
+};
+
+
+// =====================================================
+// PLATFORMS
+// =====================================================
+
+const platforms = [
+
+{x:0,y:155,w:130,h:25},
+{x:155,y:140,w:75,h:40},
+{x:250,y:125,w:80,h:55},
+{x:350,y:150,w:90,h:30},
+{x:470,y:130,w:80,h:50},
+{x:580,y:110,w:90,h:70},
+{x:700,y:145,w:90,h:35},
+{x:820,y:125,w:90,h:55},
+{x:940,y:105,w:100,h:75},
+{x:1080,y:140,w:100,h:40},
+{x:1210,y:120,w:100,h:60},
+{x:1340,y:145,w:100,h:35},
+{x:1470,y:110,w:110,h:70},
+{x:1620,y:135,w:120,h:45},
+{x:1770,y:105,w:110,h:75},
+{x:1910,y:145,w:130,h:35}
+
+];
+
+
+// =====================================================
+// COINS
+// =====================================================
+
+let coins = [];
+
+for(let i=0;i<32;i++){
+
+coins.push({
+
+x:70+i*62+(i%3)*10,
+y:90-(i%4)*12,
+collected:false
+
+});
+
+}
+
+
+// =====================================================
+// PIZZAS
+// =====================================================
+
+let pizzas = [
+
+{x:320,y:100,collected:false},
+{x:700,y:120,collected:false},
+{x:1030,y:80,collected:false},
+{x:1300,y:95,collected:false},
+{x:1600,y:85,collected:false},
+{x:1800,y:80,collected:false}
+
+];
+
+
+// =====================================================
+// ENEMIES
+// =====================================================
+
+let enemies = [
+
+{
+x:900,
+y:107,
+w:14,
+h:18,
+vx:0.35
+}
+
+];
+
+
+// =====================================================
+// ESP8266 CONTROLLER
+// =====================================================
+
+function readController(){
+
+fetch("http://192.168.43.220/controller")
+
+.then(r => r.json())
+
+.then(data => {
+
+direction = data.direction;
+jump = data.jump;
+fly = data.fly;
+
+})
+
+.catch(()=>{});
+
+}
+
+setInterval(readController,60);
+
+
+// =====================================================
+// COLLISION
+// =====================================================
+
+function collision(a,b){
+
+return(
+
+a.x < b.x+b.w &&
+a.x+a.w > b.x &&
+a.y < b.y+b.h &&
+a.y+a.h > b.y
+
+);
+
+}
+
+
+// =====================================================
+// START GAME
+// =====================================================
+
+function startGame(){
+
+state="PLAYING";
+
+score=0;
+lives=3;
+
+pizzaCount=0;
+
+flightUnlocked=false;
+flying=false;
+
+flightTime=0;
+
+level=1;
+environment=0;
+
+bossActive=false;
+bossHealth=100;
+bossTimer=0;
+
+cameraX=0;
+
+laserActive=false;
+
+player.x=35;
+player.y=100;
+
+player.vx=0;
+player.vy=0;
+
+coins.forEach(c=>{
+c.collected=false;
+});
+
+pizzas.forEach(p=>{
+p.collected=false;
+});
+
+enemies=[
+
+{
+x:900,
+y:107,
+w:14,
+h:18,
+vx:0.35
+}
+
+];
+
+hideMessage();
+
+updateHUD();
+
+}
+
+
+// =====================================================
+// PLAYER HIT
+// =====================================================
+
+function hitPlayer(){
+
+if(flying){
+return;
+}
+
+lives--;
+
+updateHUD();
+
+if(lives<=0){
+
+state="GAMEOVER";
+
+showMessage(
+
+"💀 GAME OVER<br><br>"+
+"SCORE: "+score+
+"<br><br>Press D4 to restart"
+
+);
+
+}
+
+else{
+
+player.x-=80;
+
+if(player.x<35){
+player.x=35;
+}
+
+player.y=80;
+
+}
+
+}
+
+
+// =====================================================
+// UPDATE
+// =====================================================
+
+function update(){
+
+if(state==="START"){
+
+if(fly && !previousFly){
+
+startGame();
+
+}
+
+previousFly=fly;
+
+return;
+
+}
+
+
+if(state==="GAMEOVER"){
+
+if(fly && !previousFly){
+
+hideMessage();
+startGame();
+
+}
+
+previousFly=fly;
+
+return;
+
+}
+
+
+if(state==="VICTORY"){
+
+if(fly && !previousFly){
+
+hideMessage();
+state="START";
+
+}
+
+previousFly=fly;
+
+return;
+
+}
+
+
+// =====================================================
+// MOVEMENT
+// =====================================================
+
+if(direction==="LEFT"){
+
+player.vx=-1.0;
+
+}
+
+else if(direction==="RIGHT"){
+
+player.vx=1.0;
+
+}
+
+else{
+
+player.vx*=0.55;
+
+}
+
+
+// =====================================================
+// FLIGHT ACTIVATION
+// =====================================================
+
+if(
+
+flightUnlocked &&
+fly &&
+!previousFly &&
+!flying
+
+){
+
+flying=true;
+
+flightTime=10000;
+
+}
+
+
+// =====================================================
+// FLIGHT
+// =====================================================
+
+if(flying){
+
+flightTime-=16;
+
+if(direction==="RIGHT"){
+
+player.vx=1.2;
+
+}
+
+else if(direction==="LEFT"){
+
+player.vx=-1.2;
+
+}
+
+else{
+
+player.vx*=0.55;
+
+}
+
+player.vy=-0.15;
+
+if(flightTime<=0){
+
+flying=false;
+flightTime=0;
+
+}
+
+}
+
+else{
+
+player.vy+=0.35;
+
+}
+
+
+// =====================================================
+// JUMP
+// =====================================================
+
+if(
+
+jump &&
+!previousJump &&
+player.onGround &&
+!flying
+
+){
+
+player.vy=-6.5;
+
+player.onGround=false;
+
+}
+
+
+// =====================================================
+// LASER
+// =====================================================
+
+laserActive=false;
+
+if(flying && jump){
+
+laserActive=true;
+
+}
+
+
+// =====================================================
+// MOVE PLAYER
+// =====================================================
+
+player.x+=player.vx;
+player.y+=player.vy;
+
+
+// =====================================================
+// PLATFORM COLLISION
+// =====================================================
+
+player.onGround=false;
+
+if(!flying){
+
+for(let p of platforms){
+
+if(
+
+player.x < p.x+p.w &&
+player.x+player.w > p.x &&
+player.y+player.h >= p.y &&
+player.y+player.h <= p.y+15 &&
+player.vy>=0
+
+){
+
+player.y=p.y-player.h;
+
+player.vy=0;
+
+player.onGround=true;
+
+}
+
+}
+
+}
+
+
+// =====================================================
+// COINS
+// =====================================================
+
+for(let c of coins){
+
+if(!c.collected){
+
+let box={
+x:c.x,
+y:c.y,
+w:10,
+h:10
+};
+
+if(collision(player,box)){
+
+c.collected=true;
+
+score+=25;
+
+updateHUD();
+
+}
+
+}
+
+}
+
+
+// =====================================================
+// PIZZAS
+// =====================================================
+
+for(let p of pizzas){
+
+if(!p.collected){
+
+let box={
+x:p.x,
+y:p.y,
+w:14,
+h:14
+};
+
+if(collision(player,box)){
+
+p.collected=true;
+
+pizzaCount++;
+
+score+=150;
+
+if(pizzaCount>=3){
+
+flightUnlocked=true;
+
+}
+
+updateHUD();
+
+}
+
+}
+
+}
+
+
+// =====================================================
+// ENEMIES
+// =====================================================
+
+for(let e of enemies){
+
+e.x+=e.vx;
+
+if(e.x<750){
+
+e.vx=Math.abs(e.vx);
+
+}
+
+if(e.x>1800){
+
+e.vx=-Math.abs(e.vx);
+
+}
+
+if(
+
+collision(player,e) &&
+!flying
+
+){
+
+hitPlayer();
+
+}
+
+}
+
+
+// =====================================================
+// ADD ENEMIES
+// =====================================================
+
+if(
+
+player.x>1200 &&
+enemies.length<2
+
+){
+
+enemies.push({
+
+x:1300,
+y:102,
+w:14,
+h:18,
+vx:-0.4
+
+});
+
+}
+
+
+if(
+
+player.x>1550 &&
+enemies.length<3
+
+){
+
+enemies.push({
+
+x:1650,
+y:110,
+w:14,
+h:18,
+vx:0.45
+
+});
+
+}
+
+
+// =====================================================
+// FALL
+// =====================================================
+
+if(player.y>220){
+
+hitPlayer();
+
+}
+
+
+// =====================================================
+// CAMERA
+// =====================================================
+
+cameraX=player.x-75;
+
+if(cameraX<0){
+
+cameraX=0;
+
+}
+
+
+// =====================================================
+// LEVEL
+// =====================================================
+
+level=1+Math.floor(player.x/600);
+
+
+// =====================================================
+// ENVIRONMENT
+// =====================================================
+
+environment=Math.floor(player.x/500);
+
+
+// =====================================================
+// BOSS
+// =====================================================
+
+if(
+
+player.x>1850 &&
+!bossActive
+
+){
+
+bossActive=true;
+
+bossHealth=100;
+
+state="BOSS";
+
+showMessage(
+
+"👑 FINAL BOSS<br><br>"+
+"Press D1 to enter"
+
+);
+
+}
+
+
+// =====================================================
+// ENTER BOSS
+// =====================================================
+
+if(state==="BOSS"){
+
+if(jump && !previousJump){
+
+state="BOSSFIGHT";
+
+hideMessage();
+
+}
+
+}
+
+
+// =====================================================
+// BOSS FIGHT
+// =====================================================
+
+if(state==="BOSSFIGHT"){
+
+bossTimer++;
+
+if(bossTimer%120===0){
+
+if(!flying){
+
+hitPlayer();
+
+}
+
+}
+
+if(
+
+flying &&
+laserActive
+
+){
+
+bossHealth-=2;
+
+score+=5;
+
+if(bossHealth<=0){
+
+state="VICTORY";
+
+score+=2000;
+
+showMessage(
+
+"🏆 VICTORY!<br><br>"+
+"👑 FINAL BOSS DEFEATED!"+
+"<br><br>"+
+"🦝 NEXUS RACCOON SAVED THE WORLD!"+
+"<br><br>"+
+"SCORE: "+score+
+"<br><br>"+
+"Press D4"
+
+);
+
+}
+
+}
+
+}
+
+
+previousJump=jump;
+previousFly=fly;
+
+updateHUD();
+
+}
+
+
+// =====================================================
+// HUD
+// =====================================================
+
+function updateHUD(){
+
+document.getElementById("score").innerText=score;
+
+document.getElementById("lives").innerText=lives;
+
+document.getElementById("pizza").innerText=pizzaCount;
+
+if(flying){
+
+document.getElementById("flight").innerText=
+
+Math.ceil(flightTime/1000)+"s";
+
+}
+
+else if(flightUnlocked){
+
+document.getElementById("flight").innerText="READY";
+
+}
+
+else{
+
+document.getElementById("flight").innerText="LOCKED";
+
+}
+
+}
+
+
+// =====================================================
+// BACKGROUND
+// =====================================================
+
+function drawBackground(){
+
+if(environment===0){
+
+ctx.fillStyle="#63c9ff";
+ctx.fillRect(0,0,320,180);
+
+ctx.fillStyle="#ffe36e";
+ctx.fillRect(250,20,28,28);
+
+ctx.fillStyle="#4ca84c";
+ctx.fillRect(0,140,320,40);
+
+ctx.fillStyle="#74452c";
+
+ctx.fillRect(40,100,8,40);
+ctx.fillRect(270,105,8,35);
+
+ctx.fillStyle="#2e8b42";
+
+ctx.fillRect(25,85,38,25);
+ctx.fillRect(255,90,40,25);
+
+}
+
+else if(environment===1){
+
+ctx.fillStyle="#b9edff";
+ctx.fillRect(0,0,320,180);
+
+ctx.fillStyle="#dff9ff";
+ctx.fillRect(0,0,320,120);
+
+ctx.fillStyle="#ffffff";
+
+for(let i=0;i<7;i++){
+
+ctx.fillRect(
+i*55,
+100-(i%3)*15,
+40,
+80
+);
+
+}
+
+ctx.fillStyle="#51b9dc";
+ctx.fillRect(0,155,320,25);
+
+}
+
+else if(environment===2){
+
+ctx.fillStyle="#10152f";
+ctx.fillRect(0,0,320,180);
+
+ctx.fillStyle="#ffffff";
+
+for(let i=0;i<35;i++){
+
+ctx.fillRect(
+(i*47)%320,
+(i*31)%130,
+2,
+2
+);
+
+}
+
+ctx.fillStyle="#eeeecc";
+ctx.fillRect(235,18,40,40);
+
+ctx.fillStyle="#aaa";
+
+ctx.fillRect(244,27,8,8);
+ctx.fillRect(258,40,6,6);
+
+ctx.fillStyle="#777";
+ctx.fillRect(0,150,320,30);
+
+}
+
+else{
+
+ctx.fillStyle="#391719";
+ctx.fillRect(0,0,320,180);
+
+ctx.fillStyle="#5c2525";
+ctx.fillRect(110,80,110,80);
+
+ctx.fillStyle="#ff5a24";
+
+ctx.fillRect(0,155,320,25);
+ctx.fillRect(190,125,12,35);
+
+}
+
+}
+
+
+// =====================================================
+// PLATFORMS
+// =====================================================
+
+function drawPlatforms(){
+
+for(let p of platforms){
+
+let x=p.x-cameraX;
+
+let topColor="#49a84c";
+
+if(environment===1){
+
+topColor="#e7fbff";
+
+}
+
+else if(environment===2){
+
+topColor="#aaa";
+
+}
+
+else if(environment>=3){
+
+topColor="#9b3b26";
+
+}
+
+ctx.fillStyle="#67432d";
+ctx.fillRect(x,p.y,p.w,p.h);
+
+ctx.fillStyle=topColor;
+ctx.fillRect(x,p.y,p.w,5);
+
+}
+
+}
+
+
+// =====================================================
+// COINS
+// =====================================================
+
+function drawCoins(){
+
+for(let c of coins){
+
+if(!c.collected){
+
+let x=c.x-cameraX;
+
+ctx.fillStyle="#ffd83d";
+
+ctx.fillRect(x,c.y,10,10);
+
+ctx.fillStyle="#fff5a3";
+
+ctx.fillRect(x+3,c.y+2,2,5);
+
+}
+
+}
+
+}
+
+
+// =====================================================
+// PIZZAS
+// =====================================================
+
+function drawPizzas(){
+
+for(let p of pizzas){
+
+if(!p.collected){
+
+let x=p.x-cameraX;
+
+ctx.fillStyle="#d99632";
+ctx.fillRect(x,p.y,13,10);
+
+ctx.fillStyle="#ffe66d";
+ctx.fillRect(x+2,p.y+2,9,6);
+
+ctx.fillStyle="#e3483e";
+
+ctx.fillRect(x+4,p.y+3,2,2);
+ctx.fillRect(x+8,p.y+5,2,2);
+
+}
+
+}
+
+}
+
+
+// =====================================================
+// ENEMIES
+// =====================================================
+
+function drawEnemies(){
+
+for(let e of enemies){
+
+let x=e.x-cameraX;
+
+ctx.fillStyle="#57215d";
+
+ctx.fillRect(x,e.y,e.w,e.h);
+
+ctx.fillStyle="#ffed70";
+
+ctx.fillRect(x+2,e.y+4,3,3);
+ctx.fillRect(x+9,e.y+4,3,3);
+
+}
+
+}
+
+
+// =====================================================
+// BOSS
+// =====================================================
+
+function drawBoss(){
+
+if(!bossActive){
+
+return;
+
+}
+
+let x=235;
+let y=65;
+
+ctx.fillStyle="#241026";
+ctx.fillRect(x,y,60,75);
+
+ctx.fillStyle="#ff513f";
+
+ctx.fillRect(x+5,y-10,12,15);
+ctx.fillRect(x+43,y-10,12,15);
+
+ctx.fillStyle="#fff";
+
+ctx.fillRect(x+12,y+20,9,9);
+ctx.fillRect(x+39,y+20,9,9);
+
+ctx.fillStyle="#222";
+ctx.fillRect(40,10,240,6);
+
+ctx.fillStyle="#ff4444";
+
+ctx.fillRect(
+40,
+10,
+240*(bossHealth/100),
+6
+);
+
+}
+
+
+// =====================================================
+// RACCOON
+// =====================================================
+
+function drawRaccoon(){
+
+let x=player.x-cameraX;
+let y=player.y;
+
+
+// Tail
+
+ctx.fillStyle="#765139";
+ctx.fillRect(x-9,y+8,9,14);
+
+ctx.fillStyle="#ddd";
+ctx.fillRect(x-9,y+13,9,4);
+
+
+// Body
+
+ctx.fillStyle="#888";
+ctx.fillRect(x+3,y+8,14,12);
+
+
+// Backpack
+
+ctx.fillStyle="#b96e35";
+ctx.fillRect(x+12,y+8,9,11);
+
+ctx.fillStyle="#ffe36b";
+ctx.fillRect(x+15,y+12,3,3);
+
+
+// Head
+
+ctx.fillStyle="#999";
+ctx.fillRect(x+2,y,18,13);
+
+
+// Ears
+
+ctx.fillRect(x+2,y-4,6,6);
+ctx.fillRect(x+14,y-4,6,6);
+
+
+// Mask
+
+ctx.fillStyle="#333";
+ctx.fillRect(x+3,y+4,16,6);
+
+
+// Eyes
+
+ctx.fillStyle="#ffe66d";
+
+ctx.fillRect(x+6,y+5,3,3);
+ctx.fillRect(x+14,y+5,3,3);
+
+
+// Nose
+
+ctx.fillStyle="#222";
+ctx.fillRect(x+10,y+8,3,2);
+
+
+// Legs
+
+ctx.fillStyle="#666";
+
+ctx.fillRect(x+4,y+19,4,5);
+ctx.fillRect(x+13,y+19,4,5);
+
+
+// Flying effect
+
+if(flying){
+
+ctx.fillStyle="#ffe66d";
+
+ctx.fillRect(x-5,y+4,3,17);
+ctx.fillRect(x+21,y+4,3,17);
+
+}
+
+
+// Laser
+
+if(laserActive){
+
+ctx.fillStyle="#ff3030";
+
+ctx.fillRect(x+18,y+8,45,3);
+
+ctx.fillStyle="#ffffff";
+
+ctx.fillRect(x+20,y+9,40,1);
+
+}
+
+}
+
+
+// =====================================================
+// START SCREEN
+// =====================================================
+
+function drawStart(){
+
+ctx.fillStyle="#63c9ff";
+ctx.fillRect(0,0,320,180);
+
+ctx.fillStyle="#ffe36e";
+ctx.fillRect(245,18,30,30);
+
+ctx.fillStyle="#fff";
+
+ctx.font="19px monospace";
+
+ctx.fillText(
+"NEXUS RACCOON",
+55,
+45
+);
+
+ctx.font="9px monospace";
+
+ctx.fillText(
+"ADVENTURE",
+125,
+60
+);
+
+let oldX=player.x;
+let oldY=player.y;
+
+player.x=145;
+player.y=80;
+
+cameraX=0;
+
+drawRaccoon();
+
+player.x=oldX;
+player.y=oldY;
+
+ctx.fillStyle="#ffe66d";
+
+ctx.font="12px monospace";
+
+ctx.fillText(
+"PRESS D4 TO START",
+95,
+155
+);
+
+}
+
+
+// =====================================================
+// DRAW
+// =====================================================
+
+function draw(){
+
+if(state==="START"){
+
+drawStart();
+return;
+
+}
+
+drawBackground();
+
+drawPlatforms();
+
+drawCoins();
+
+drawPizzas();
+
+drawEnemies();
+
+drawBoss();
+
+drawRaccoon();
+
+ctx.fillStyle="#fff";
+
+ctx.font="8px monospace";
+
+ctx.fillText(
+"LEVEL "+level,
+8,
+12
+);
+
+}
+
+
+// =====================================================
+// MESSAGE
+// =====================================================
+
+function showMessage(text){
+
+let m=document.getElementById("message");
+
+m.innerHTML=text;
+
+m.style.display="block";
+
+}
+
+
+function hideMessage(){
+
+document.getElementById("message").style.display="none";
+
+}
+
+
+// =====================================================
+// MAIN LOOP
+// =====================================================
+
+function loop(){
+
+update();
+
+draw();
+
+requestAnimationFrame(loop);
+
+}
+
+updateHUD();
+
+loop();
+
+</script>
+
+</body>
+
+</html>
