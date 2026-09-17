@@ -1,3 +1,70 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+
+/*
+=====================================================
+NEXUS RACCOON
+ESP8266 CONTROLLER + WEB GAME
+=====================================================
+
+SAFE PIN CONNECTIONS
+
+Joystick:
+  +5V -> ESP8266 3V3
+  GND -> GND
+  VRx -> A0
+  SW  -> D6
+
+Buttons:
+  JUMP -> D1
+  FLY  -> D4
+
+IMPORTANT:
+Do NOT connect the joystick +5V pin to ESP8266 5V/VIN.
+Use 3V3 for the joystick.
+
+D1, D4 and D6 use INPUT_PULLUP.
+
+Released = HIGH
+Pressed  = LOW
+
+CONTROLS:
+
+Joystick LEFT / RIGHT = Move
+Joystick CENTER        = Start / Pause / Resume / Reset
+D1                     = Jump / Laser
+D4                     = Fly
+=====================================================
+*/
+
+
+// =====================================================
+// WIFI
+// =====================================================
+
+const char* ssid = "Galaxy M114ed6";
+const char* password = "zihk7741";
+
+ESP8266WebServer server(80);
+
+
+// =====================================================
+// PINS
+// =====================================================
+
+const int joystickX = A0;
+
+const int jumpButton = D1;
+const int flyButton = D4;
+const int centerButton = D6;
+
+
+// =====================================================
+// WEB GAME
+// =====================================================
+
+const char GAME_PAGE[] PROGMEM = R"rawliteral(
+
 <!DOCTYPE html>
 <html>
 
@@ -34,7 +101,9 @@ overflow:hidden;
 body{
 
 display:flex;
+
 align-items:center;
+
 justify-content:center;
 
 }
@@ -42,6 +111,7 @@ justify-content:center;
 #container{
 
 width:96vw;
+
 max-width:900px;
 
 text-align:center;
@@ -53,6 +123,8 @@ text-align:center;
 display:flex;
 
 justify-content:space-between;
+
+align-items:center;
 
 flex-wrap:wrap;
 
@@ -69,6 +141,12 @@ border-radius:10px;
 font-size:13px;
 
 font-weight:bold;
+
+}
+
+#hud div{
+
+white-space:nowrap;
 
 }
 
@@ -108,6 +186,8 @@ font-size:11px;
 
 color:#bfc7e8;
 
+line-height:1.5;
+
 }
 
 #message{
@@ -128,7 +208,7 @@ border-radius:12px;
 
 padding:22px;
 
-min-width:280px;
+min-width:300px;
 
 display:none;
 
@@ -139,6 +219,28 @@ font-size:17px;
 line-height:1.6;
 
 box-shadow:0 0 30px #000;
+
+text-align:left;
+
+}
+
+.messageTitle{
+
+font-size:20px;
+
+font-weight:bold;
+
+color:#ffe45c;
+
+text-align:center;
+
+margin-bottom:15px;
+
+}
+
+.messageText{
+
+text-align:left;
 
 }
 
@@ -153,9 +255,13 @@ box-shadow:0 0 30px #000;
 <div id="container">
 
 
+<!-- =================================================
+HUD
+================================================= -->
+
 <div id="hud">
 
-<div>🦝 NEXUS</div>
+<div>NEXUS</div>
 
 <div>
 SCORE:
@@ -168,12 +274,12 @@ HIGH:
 </div>
 
 <div>
-❤️
+LIVES:
 <span id="lives">3</span>
 </div>
 
 <div>
-🍕
+PIZZAS:
 <span id="pizza">0</span>/3
 </div>
 
@@ -184,6 +290,10 @@ READY
 </div>
 
 
+<!-- =================================================
+GAME CANVAS
+================================================= -->
+
 <canvas
 id="game"
 width="480"
@@ -191,20 +301,18 @@ height="270">
 </canvas>
 
 
+<!-- =================================================
+CONTROLS
+================================================= -->
+
 <div id="controls">
 
 JOYSTICK LEFT / RIGHT
-
 &nbsp; | &nbsp;
-
-CENTER = START / RESET / PAUSE
-
+CENTER = START / PAUSE / RESET
 &nbsp; | &nbsp;
-
 D1 = JUMP / LASER
-
 &nbsp; | &nbsp;
-
 D4 = FLY
 
 </div>
@@ -212,6 +320,10 @@ D4 = FLY
 
 </div>
 
+
+<!-- =================================================
+MESSAGE BOX
+================================================= -->
 
 <div id="message"></div>
 
@@ -229,14 +341,14 @@ document.getElementById("game");
 const ctx =
 canvas.getContext("2d");
 
-ctx.imageSmoothingEnabled=false;
+ctx.imageSmoothingEnabled = false;
 
 
 // =====================================================
-// CONTROLLER
+// CONTROLLER INPUT
 // =====================================================
 
-let input={
+let input = {
 
 direction:"CENTER",
 
@@ -251,7 +363,7 @@ pause:false
 };
 
 
-let previous={
+let previous = {
 
 jump:false,
 
@@ -268,48 +380,46 @@ pause:false
 // GAME STATE
 // =====================================================
 
-let state="START";
+let state = "START";
 
-let score=0;
+let score = 0;
 
-let lives=3;
+let lives = 3;
 
-let pizzaCount=0;
+let pizzaCount = 0;
 
-let highScore=
-
+let highScore =
 Number(
 localStorage.getItem("nexusHighScore") || 0
 );
 
-let cameraX=0;
+let cameraX = 0;
 
-let flightUnlocked=false;
+let flightUnlocked = false;
 
-let flying=false;
+let flying = false;
 
-let flightTime=0;
+let flightTime = 0;
 
 
 // =====================================================
 // SOUND
 // =====================================================
 
-let audioContext=null;
+let audioContext = null;
 
 
 function beep(
 
-frequency=600,
+frequency = 600,
 
-duration=0.08
+duration = 0.08
 
 ){
 
 try{
 
-audioContext=
-
+audioContext =
 audioContext ||
 
 new(
@@ -317,71 +427,93 @@ window.AudioContext ||
 window.webkitAudioContext
 )();
 
-let oscillator=
+
+let oscillator =
 audioContext.createOscillator();
 
-let gain=
+
+let gain =
 audioContext.createGain();
 
-oscillator.type="square";
 
-oscillator.frequency.value=
+oscillator.type = "square";
+
+oscillator.frequency.value =
 frequency;
 
-gain.gain.value=0.035;
+
+gain.gain.value = 0.035;
+
 
 oscillator.connect(gain);
 
-gain.connect(audioContext.destination);
+gain.connect(
+audioContext.destination
+);
+
 
 oscillator.start();
+
 
 gain.gain.exponentialRampToValueAtTime(
 
 0.001,
 
-audioContext.currentTime+
+audioContext.currentTime +
 duration
 
 );
 
+
 oscillator.stop(
 
-audioContext.currentTime+
+audioContext.currentTime +
 duration
 
 );
 
 }
 
-catch(e){}
+catch(e){
+
+}
 
 }
 
 
 // =====================================================
-// ESP8266 CONTROLLER
+// READ ESP8266 CONTROLLER
 // =====================================================
 
 async function readController(){
 
 try{
 
-/*
-If this website is deployed on Vercel,
-there is no ESP8266 server at the same URL.
+let response =
 
-Therefore controller input is disabled
-when running on Vercel.
+await fetch(
 
-The game still works normally.
-*/
+"/controller?time=" +
+Date.now(),
 
-return;
+{
+
+cache:"no-store"
+
+}
+
+);
+
+
+input =
+await response.json();
 
 }
 
 catch(error){
+
+// ESP8266 temporarily unavailable.
+// Game continues.
 
 }
 
@@ -398,7 +530,7 @@ readController,
 
 
 // =====================================================
-// BUTTON EDGE
+// BUTTON EDGE DETECTION
 // =====================================================
 
 function pressed(button){
@@ -418,23 +550,45 @@ previous[button] !== true
 // MESSAGE
 // =====================================================
 
-function showMessage(text){
+function showMessage(
 
-let message=
+title,
 
-document.getElementById("message");
+text
 
-message.innerHTML=text;
+){
 
-message.style.display="block";
+let message =
+document.getElementById(
+"message"
+);
+
+
+message.innerHTML =
+
+"<div class='messageTitle'>" +
+
+title +
+
+"</div>" +
+
+"<div class='messageText'>" +
+
+text +
+
+"</div>";
+
+
+message.style.display = "block";
 
 }
 
 
 function hideMessage(){
 
-document.getElementById("message")
-.style.display="none";
+document.getElementById(
+"message"
+).style.display = "none";
 
 }
 
@@ -443,7 +597,7 @@ document.getElementById("message")
 // PLAYER
 // =====================================================
 
-let player={
+let player = {
 
 x:45,
 
@@ -466,7 +620,7 @@ onGround:false
 // PLATFORMS
 // =====================================================
 
-const platforms=[
+const platforms = [
 
 {x:0,y:235,w:220,h:35},
 
@@ -497,13 +651,14 @@ const platforms=[
 // COINS
 // =====================================================
 
-let coins=[];
+let coins = [];
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<36;
+i < 36;
 
 i++
 
@@ -511,9 +666,9 @@ i++
 
 coins.push({
 
-x:80+i*55,
+x:80 + i * 55,
 
-y:145-(i%4)*18,
+y:145 - (i % 4) * 18,
 
 collected:false
 
@@ -526,7 +681,7 @@ collected:false
 // PIZZAS
 // =====================================================
 
-let pizzas=[
+let pizzas = [
 
 {x:300,y:175,collected:false},
 
@@ -547,7 +702,7 @@ let pizzas=[
 // ENEMIES
 // =====================================================
 
-let enemies=[
+let enemies = [
 
 {
 
@@ -588,13 +743,13 @@ function collision(a,b){
 
 return(
 
-a.x < b.x+b.width &&
+a.x < b.x + b.width &&
 
-a.x+a.width > b.x &&
+a.x + a.width > b.x &&
 
-a.y < b.y+b.height &&
+a.y < b.y + b.height &&
 
-a.y+a.height > b.y
+a.y + a.height > b.y
 
 );
 
@@ -602,53 +757,62 @@ a.y+a.height > b.y
 
 
 // =====================================================
-// START / RESET
+// RESET GAME
 // =====================================================
 
 function resetGame(){
 
-state="PLAYING";
+state = "PLAYING";
 
-score=0;
+score = 0;
 
-lives=3;
+lives = 3;
 
-pizzaCount=0;
+pizzaCount = 0;
 
-flightUnlocked=false;
+flightUnlocked = false;
 
-flying=false;
+flying = false;
 
-flightTime=0;
+flightTime = 0;
 
-cameraX=0;
+cameraX = 0;
 
-player.x=45;
 
-player.y=100;
+player.x = 45;
 
-player.vx=0;
+player.y = 100;
 
-player.vy=0;
+player.vx = 0;
 
-player.onGround=false;
+player.vy = 0;
+
+player.onGround = false;
 
 
 coins.forEach(
 
-coin=>coin.collected=false
+coin => {
+
+coin.collected = false;
+
+}
 
 );
 
 
 pizzas.forEach(
 
-pizza=>pizza.collected=false
+pizza => {
+
+pizza.collected = false;
+
+}
 
 );
 
 
-enemies=[
+enemies = [
 
 {
 
@@ -696,9 +860,9 @@ updateHUD();
 
 function gameOver(){
 
-if(score>highScore){
+if(score > highScore){
 
-highScore=score;
+highScore = score;
 
 localStorage.setItem(
 
@@ -710,21 +874,24 @@ highScore
 
 }
 
-state="GAMEOVER";
+
+state = "GAMEOVER";
+
 
 updateHUD();
 
+
 showMessage(
 
-"💀 GAME OVER<br><br>"+
+"GAME OVER",
 
-"SCORE: "+score+
+"SCORE: " +
+score +
 
-"<br>"+
+"<br>HIGH SCORE: " +
+highScore +
 
-"HIGH SCORE: "+highScore+
-
-"<br><br>"+
+"<br><br>" +
 
 "CENTER BUTTON = RESET"
 
@@ -745,11 +912,13 @@ return;
 
 }
 
+
 lives--;
 
 beep(150,0.15);
 
-if(lives<=0){
+
+if(lives <= 0){
 
 gameOver();
 
@@ -757,19 +926,23 @@ return;
 
 }
 
-player.x-=120;
 
-if(player.x<45){
+player.x -= 120;
 
-player.x=45;
+
+if(player.x < 45){
+
+player.x = 45;
 
 }
 
-player.y=100;
 
-player.vx=0;
+player.y = 100;
 
-player.vy=0;
+player.vx = 0;
+
+player.vy = 0;
+
 
 updateHUD();
 
@@ -783,54 +956,18 @@ updateHUD();
 function update(){
 
 
-// -----------------------------------------------------
-// KEYBOARD / MOUSE / TOUCH CONTROLS
-// -----------------------------------------------------
-
-if(
-
-keys["ArrowLeft"] ||
-
-keys["a"] ||
-
-keys["A"]
-
-){
-
-input.direction="LEFT";
-
-}
-
-else if(
-
-keys["ArrowRight"] ||
-
-keys["d"] ||
-
-keys["D"]
-
-){
-
-input.direction="RIGHT";
-
-}
-
-else{
-
-input.direction="CENTER";
-
-}
-
-
-// -----------------------------------------------------
-// CENTER BUTTON / RESET
-// -----------------------------------------------------
+// =====================================================
+// CENTER BUTTON
+// =====================================================
 
 if(pressed("reset")){
 
-if(state==="PAUSED"){
 
-state="PLAYING";
+// PAUSED -> RESUME
+
+if(state === "PAUSED"){
+
+state = "PLAYING";
 
 hideMessage();
 
@@ -838,11 +975,14 @@ beep(700,0.08);
 
 }
 
+
+// GAME OVER -> RESET
+
 else if(
 
-state==="GAMEOVER" ||
+state === "GAMEOVER" ||
 
-state==="VICTORY"
+state === "VICTORY"
 
 ){
 
@@ -850,21 +990,27 @@ resetGame();
 
 }
 
-else if(state==="START"){
+
+// START -> BEGIN GAME
+
+else if(state === "START"){
 
 resetGame();
 
 }
 
-else{
 
-state="PAUSED";
+// PLAYING -> PAUSE
+
+else if(state === "PLAYING"){
+
+state = "PAUSED";
 
 showMessage(
 
-"⏸ PAUSED<br><br>"+
+"GAME PAUSED",
 
-"PRESS SPACE TO RESUME"
+"CENTER BUTTON = RESUME"
 
 );
 
@@ -872,7 +1018,8 @@ beep(400,0.08);
 
 }
 
-previous=
+
+previous =
 Object.assign({},input);
 
 return;
@@ -880,29 +1027,13 @@ return;
 }
 
 
-// -----------------------------------------------------
+// =====================================================
 // START SCREEN
-// -----------------------------------------------------
+// =====================================================
 
-if(state==="START"){
+if(state === "START"){
 
-if(
-
-pressed("fly") ||
-
-pressed("jump") ||
-
-keys["Enter"] ||
-
-keys[" "]
-
-){
-
-resetGame();
-
-}
-
-previous=
+previous =
 Object.assign({},input);
 
 return;
@@ -910,19 +1041,19 @@ return;
 }
 
 
-// -----------------------------------------------------
+// =====================================================
 // GAME OVER / VICTORY
-// -----------------------------------------------------
+// =====================================================
 
 if(
 
-state==="GAMEOVER" ||
+state === "GAMEOVER" ||
 
-state==="VICTORY"
+state === "VICTORY"
 
 ){
 
-previous=
+previous =
 Object.assign({},input);
 
 return;
@@ -930,13 +1061,13 @@ return;
 }
 
 
-// -----------------------------------------------------
+// =====================================================
 // PAUSED
-// -----------------------------------------------------
+// =====================================================
 
-if(state==="PAUSED"){
+if(state === "PAUSED"){
 
-previous=
+previous =
 Object.assign({},input);
 
 return;
@@ -950,27 +1081,27 @@ return;
 
 if(
 
-input.direction==="LEFT"
+input.direction === "LEFT"
 
 ){
 
-player.vx=-1.6;
+player.vx = -1.6;
 
 }
 
 else if(
 
-input.direction==="RIGHT"
+input.direction === "RIGHT"
 
 ){
 
-player.vx=1.6;
+player.vx = 1.6;
 
 }
 
 else{
 
-player.vx*=0.78;
+player.vx *= 0.78;
 
 }
 
@@ -989,9 +1120,9 @@ flightUnlocked &&
 
 ){
 
-flying=true;
+flying = true;
 
-flightTime=900;
+flightTime = 900;
 
 beep(850,0.1);
 
@@ -1000,39 +1131,37 @@ beep(850,0.1);
 
 if(flying){
 
-flightTime-=16;
+flightTime -= 16;
 
-player.vy=-0.25;
+player.vy = -0.25;
+
 
 if(
 
-input.direction==="RIGHT"
+input.direction === "RIGHT"
 
 ){
 
-player.vx=2;
+player.vx = 2;
 
 }
 
 else if(
 
-input.direction==="LEFT"
+input.direction === "LEFT"
 
 ){
 
-player.vx=-2;
+player.vx = -2;
 
 }
 
-if(
 
-flightTime<=0
+if(flightTime <= 0){
 
-){
+flying = false;
 
-flying=false;
-
-flightTime=0;
+flightTime = 0;
 
 beep(250,0.1);
 
@@ -1042,7 +1171,7 @@ beep(250,0.1);
 
 else{
 
-player.vy+=0.45;
+player.vy += 0.45;
 
 }
 
@@ -1061,7 +1190,7 @@ player.onGround &&
 
 ){
 
-player.vy=-8;
+player.vy = -8;
 
 beep(500,0.08);
 
@@ -1072,16 +1201,17 @@ beep(500,0.08);
 // POSITION
 // =====================================================
 
-player.x+=player.vx;
+player.x += player.vx;
 
-player.y+=player.vy;
+player.y += player.vy;
 
 
 // =====================================================
 // PLATFORM COLLISION
 // =====================================================
 
-player.onGround=false;
+player.onGround = false;
+
 
 if(!flying){
 
@@ -1094,27 +1224,27 @@ const platform of platforms
 if(
 
 player.x <
-platform.x+platform.w &&
+platform.x + platform.w &&
 
-player.x+player.width >
+player.x + player.width >
 platform.x &&
 
-player.y+player.height >=
+player.y + player.height >=
 platform.y &&
 
-player.y+player.height <=
-platform.y+18 &&
+player.y + player.height <=
+platform.y + 18 &&
 
-player.vy>=0
+player.vy >= 0
 
 ){
 
-player.y=
-platform.y-player.height;
+player.y =
+platform.y - player.height;
 
-player.vy=0;
+player.vy = 0;
 
-player.onGround=true;
+player.onGround = true;
 
 }
 
@@ -1157,9 +1287,9 @@ height:12
 
 ){
 
-coin.collected=true;
+coin.collected = true;
 
-score+=25;
+score += 25;
 
 beep(900,0.035);
 
@@ -1204,17 +1334,18 @@ height:14
 
 ){
 
-pizza.collected=true;
+pizza.collected = true;
 
 pizzaCount++;
 
-score+=150;
+score += 150;
 
 beep(1100,0.08);
 
-if(pizzaCount>=3){
 
-flightUnlocked=true;
+if(pizzaCount >= 3){
+
+flightUnlocked = true;
 
 beep(1300,0.15);
 
@@ -1237,21 +1368,24 @@ const enemy of enemies
 
 ){
 
-enemy.x+=enemy.vx;
+enemy.x += enemy.vx;
 
-if(enemy.x<500){
 
-enemy.vx=
+if(enemy.x < 500){
+
+enemy.vx =
 Math.abs(enemy.vx);
 
 }
 
-if(enemy.x>1900){
 
-enemy.vx=
+if(enemy.x > 1900){
+
+enemy.vx =
 -Math.abs(enemy.vx);
 
 }
+
 
 if(
 
@@ -1288,7 +1422,7 @@ hitPlayer();
 // FALL
 // =====================================================
 
-if(player.y>330){
+if(player.y > 330){
 
 hitPlayer();
 
@@ -1299,13 +1433,13 @@ hitPlayer();
 // CAMERA
 // =====================================================
 
-cameraX=
+cameraX =
 
 Math.max(
 
 0,
 
-player.x-110
+player.x - 110
 
 );
 
@@ -1314,13 +1448,14 @@ player.x-110
 // FINISH
 // =====================================================
 
-if(player.x>1980){
+if(player.x > 1980){
 
-state="VICTORY";
+state = "VICTORY";
 
-if(score>highScore){
 
-highScore=score;
+if(score > highScore){
+
+highScore = score;
 
 localStorage.setItem(
 
@@ -1332,25 +1467,27 @@ highScore
 
 }
 
+
 beep(1200,0.25);
+
 
 showMessage(
 
-"🏆 VICTORY!<br><br>"+
+"VICTORY",
 
-"NEXUS RACCOON FINISHED!"+
+"NEXUS RACCOON FINISHED!" +
 
-"<br><br>"+
+"<br><br>" +
 
-"SCORE: "+score+
+"SCORE: " +
+score +
 
-"<br>"+
+"<br>HIGH SCORE: " +
+highScore +
 
-"HIGH SCORE: "+highScore+
+"<br><br>" +
 
-"<br><br>"+
-
-"PRESS ENTER TO RESET"
+"CENTER BUTTON = RESET"
 
 );
 
@@ -1361,147 +1498,13 @@ showMessage(
 // SAVE BUTTON STATE
 // =====================================================
 
-previous=
+previous =
 Object.assign({},input);
+
 
 updateHUD();
 
 }
-
-
-// =====================================================
-// KEYBOARD CONTROLS
-// =====================================================
-
-let keys={};
-
-
-document.addEventListener(
-
-"keydown",
-
-function(event){
-
-keys[event.key]=true;
-
-
-// SPACE = JUMP
-
-if(
-
-event.key===" " &&
-
-!event.repeat
-
-){
-
-input.jump=true;
-
-}
-
-
-// ENTER = RESET / START
-
-if(
-
-event.key==="Enter" &&
-
-!event.repeat
-
-){
-
-input.reset=true;
-
-}
-
-});
-
-
-
-document.addEventListener(
-
-"keyup",
-
-function(event){
-
-keys[event.key]=false;
-
-
-if(event.key===" "){
-
-input.jump=false;
-
-}
-
-
-if(event.key==="Enter"){
-
-input.reset=false;
-
-}
-
-});
-
-
-// =====================================================
-// TOUCH / MOBILE CONTROLS
-// =====================================================
-
-canvas.addEventListener(
-
-"touchstart",
-
-function(event){
-
-event.preventDefault();
-
-let touch=
-event.touches[0];
-
-let rect=
-canvas.getBoundingClientRect();
-
-let x=
-touch.clientX-rect.left;
-
-if(x<rect.width/3){
-
-input.direction="LEFT";
-
-}
-
-else if(x>rect.width*2/3){
-
-input.direction="RIGHT";
-
-}
-
-else{
-
-input.jump=true;
-
-}
-
-},
-{passive:false}
-);
-
-
-canvas.addEventListener(
-
-"touchend",
-
-function(event){
-
-event.preventDefault();
-
-input.direction="CENTER";
-
-input.jump=false;
-
-},
-{passive:false}
-);
 
 
 // =====================================================
@@ -1510,35 +1513,49 @@ input.jump=false;
 
 function updateHUD(){
 
-document.getElementById("score")
-.textContent=score;
+document.getElementById(
+"score"
+).textContent = score;
 
-document.getElementById("high")
-.textContent=highScore;
 
-document.getElementById("lives")
-.textContent=lives;
+document.getElementById(
+"high"
+).textContent = highScore;
 
-document.getElementById("pizza")
-.textContent=pizzaCount;
 
-if(state==="PLAYING"){
+document.getElementById(
+"lives"
+).textContent = lives;
 
-document.getElementById("status")
-.textContent=
 
-flying ? "FLYING" :
+document.getElementById(
+"pizza"
+).textContent = pizzaCount;
+
+
+if(state === "PLAYING"){
+
+document.getElementById(
+"status"
+).textContent =
+
+flying ?
+
+"FLYING" :
 
 flightUnlocked ?
+
 "FLIGHT READY" :
+
 "PLAYING";
 
 }
 
 else{
 
-document.getElementById("status")
-.textContent=state;
+document.getElementById(
+"status"
+).textContent = state;
 
 }
 
@@ -1551,39 +1568,59 @@ document.getElementById("status")
 
 function drawBackground(){
 
-let environment=
+let environment =
 
-Math.floor(player.x/500);
+Math.floor(
+
+player.x / 500
+
+);
 
 
+// =====================================================
 // SKY
-// -----------------------------------------------------
+// =====================================================
 
-if(environment===0){
+if(environment === 0){
 
-ctx.fillStyle="#65c9ff";
-
-ctx.fillRect(
-
-0,0,480,270
-
-);
-
-ctx.fillStyle="#ffe76a";
+ctx.fillStyle = "#65c9ff";
 
 ctx.fillRect(
 
-390,25,35,35
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffe76a";
+
+ctx.fillRect(
+
+390,
+
+25,
+
+35,
+
+35
+
+);
+
+
+ctx.fillStyle = "#ffffff";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<4;
+i < 4;
 
 i++
 
@@ -1591,9 +1628,9 @@ i++
 
 ctx.fillRect(
 
-50+i*120,
+50 + i * 120,
 
-55+(i%2)*25,
+55 + (i % 2) * 25,
 
 45,
 
@@ -1603,37 +1640,53 @@ ctx.fillRect(
 
 }
 
-ctx.fillStyle="#4c9d4a";
+
+ctx.fillStyle = "#4c9d4a";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // SPACE
-// -----------------------------------------------------
+// =====================================================
 
-else if(environment===1){
+else if(environment === 1){
 
-ctx.fillStyle="#182c55";
+ctx.fillStyle = "#182c55";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffffff";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<25;
+i < 25;
 
 i++
 
@@ -1641,9 +1694,9 @@ i++
 
 ctx.fillRect(
 
-(i*83)%480,
+(i * 83) % 480,
 
-(i*47)%200,
+(i * 47) % 200,
 
 3,
 
@@ -1653,83 +1706,133 @@ ctx.fillRect(
 
 }
 
-ctx.fillStyle="#4c80c4";
+
+ctx.fillStyle = "#4c80c4";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // MOON
-// -----------------------------------------------------
+// =====================================================
 
-else if(environment===2){
+else if(environment === 2){
 
-ctx.fillStyle="#171329";
+ctx.fillStyle = "#171329";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ddd";
+
+ctx.fillStyle = "#dddddd";
 
 ctx.fillRect(
 
-365,30,55,55
+365,
+
+30,
+
+55,
+
+55
 
 );
 
-ctx.fillStyle="#777";
+
+ctx.fillStyle = "#777777";
 
 ctx.fillRect(
 
-375,42,10,10
+375,
+
+42,
+
+10,
+
+10
 
 );
 
 ctx.fillRect(
 
-400,65,9,9
+400,
+
+65,
+
+9,
+
+9
 
 );
 
-ctx.fillStyle="#555";
+
+ctx.fillStyle = "#555555";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // VOLCANO
-// -----------------------------------------------------
+// =====================================================
 
 else{
 
-ctx.fillStyle="#32151d";
+ctx.fillStyle = "#32151d";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#6d2525";
+
+ctx.fillStyle = "#6d2525";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<8;
+i < 8;
 
 i++
 
@@ -1737,9 +1840,9 @@ i++
 
 ctx.fillRect(
 
-i*70,
+i * 70,
 
-145-(i%2)*20,
+145 - (i % 2) * 20,
 
 35,
 
@@ -1749,11 +1852,18 @@ i*70,
 
 }
 
-ctx.fillStyle="#ff592d";
+
+ctx.fillStyle = "#ff592d";
 
 ctx.fillRect(
 
-0,220,480,50
+0,
+
+220,
+
+480,
+
+50
 
 );
 
@@ -1774,11 +1884,12 @@ const platform of platforms
 
 ){
 
-let x=
+let x =
 
-platform.x-cameraX;
+platform.x - cameraX;
 
-ctx.fillStyle="#583a2b";
+
+ctx.fillStyle = "#583a2b";
 
 ctx.fillRect(
 
@@ -1792,7 +1903,8 @@ platform.h
 
 );
 
-ctx.fillStyle="#5fba55";
+
+ctx.fillStyle = "#5fba55";
 
 ctx.fillRect(
 
@@ -1825,11 +1937,12 @@ const coin of coins
 
 if(!coin.collected){
 
-let x=
+let x =
 
-coin.x-cameraX;
+coin.x - cameraX;
 
-ctx.fillStyle="#ffd83d";
+
+ctx.fillStyle = "#ffd83d";
 
 ctx.fillRect(
 
@@ -1843,13 +1956,14 @@ coin.y,
 
 );
 
-ctx.fillStyle="#fff5a3";
+
+ctx.fillStyle = "#fff5a3";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-coin.y+2,
+coin.y + 2,
 
 3,
 
@@ -1878,11 +1992,12 @@ const pizza of pizzas
 
 if(!pizza.collected){
 
-let x=
+let x =
 
-pizza.x-cameraX;
+pizza.x - cameraX;
 
-ctx.fillStyle="#d99032";
+
+ctx.fillStyle = "#d99032";
 
 ctx.fillRect(
 
@@ -1896,13 +2011,14 @@ pizza.y,
 
 );
 
-ctx.fillStyle="#ffe66d";
+
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-pizza.y+2,
+pizza.y + 2,
 
 12,
 
@@ -1910,13 +2026,14 @@ pizza.y+2,
 
 );
 
-ctx.fillStyle="#e5483e";
+
+ctx.fillStyle = "#e5483e";
 
 ctx.fillRect(
 
-x+5,
+x + 5,
 
-pizza.y+3,
+pizza.y + 3,
 
 3,
 
@@ -1943,11 +2060,12 @@ const enemy of enemies
 
 ){
 
-let x=
+let x =
 
-enemy.x-cameraX;
+enemy.x - cameraX;
 
-ctx.fillStyle="#9b3aa3";
+
+ctx.fillStyle = "#9b3aa3";
 
 ctx.fillRect(
 
@@ -1961,13 +2079,14 @@ enemy.y,
 
 );
 
-ctx.fillStyle="#ffe66d";
+
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-enemy.y+5,
+enemy.y + 5,
 
 4,
 
@@ -1975,11 +2094,12 @@ enemy.y+5,
 
 );
 
+
 ctx.fillRect(
 
-x+11,
+x + 11,
 
-enemy.y+5,
+enemy.y + 5,
 
 4,
 
@@ -1998,24 +2118,27 @@ enemy.y+5,
 
 function drawPlayer(){
 
-let x=
+let x =
 
-player.x-cameraX;
+player.x - cameraX;
 
-let y=
+
+let y =
 
 player.y;
 
 
+// =====================================================
 // TAIL
+// =====================================================
 
-ctx.fillStyle="#765139";
+ctx.fillStyle = "#765139";
 
 ctx.fillRect(
 
-x-10,
+x - 10,
 
-y+10,
+y + 10,
 
 10,
 
@@ -2023,13 +2146,14 @@ y+10,
 
 );
 
-ctx.fillStyle="#ddd";
+
+ctx.fillStyle = "#dddddd";
 
 ctx.fillRect(
 
-x-10,
+x - 10,
 
-y+16,
+y + 16,
 
 10,
 
@@ -2038,15 +2162,17 @@ y+16,
 );
 
 
+// =====================================================
 // BODY
+// =====================================================
 
-ctx.fillStyle="#888";
+ctx.fillStyle = "#888888";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-y+9,
+y + 9,
 
 18,
 
@@ -2055,15 +2181,17 @@ y+9,
 );
 
 
+// =====================================================
 // BACKPACK
+// =====================================================
 
-ctx.fillStyle="#b96e35";
+ctx.fillStyle = "#b96e35";
 
 ctx.fillRect(
 
-x+14,
+x + 14,
 
-y+9,
+y + 9,
 
 10,
 
@@ -2071,13 +2199,14 @@ y+9,
 
 );
 
-ctx.fillStyle="#ffe36b";
+
+ctx.fillStyle = "#ffe36b";
 
 ctx.fillRect(
 
-x+17,
+x + 17,
 
-y+14,
+y + 14,
 
 4,
 
@@ -2086,13 +2215,15 @@ y+14,
 );
 
 
+// =====================================================
 // HEAD
+// =====================================================
 
-ctx.fillStyle="#999";
+ctx.fillStyle = "#999999";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
 y,
 
@@ -2103,13 +2234,15 @@ y,
 );
 
 
+// =====================================================
 // EARS
+// =====================================================
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-y-5,
+y - 5,
 
 7,
 
@@ -2119,9 +2252,9 @@ y-5,
 
 ctx.fillRect(
 
-x+17,
+x + 17,
 
-y-5,
+y - 5,
 
 7,
 
@@ -2130,15 +2263,17 @@ y-5,
 );
 
 
+// =====================================================
 // MASK
+// =====================================================
 
-ctx.fillStyle="#333";
+ctx.fillStyle = "#333333";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-y+5,
+y + 5,
 
 20,
 
@@ -2147,15 +2282,17 @@ y+5,
 );
 
 
+// =====================================================
 // EYES
+// =====================================================
 
-ctx.fillStyle="#ffe66d";
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+7,
+x + 7,
 
-y+6,
+y + 6,
 
 4,
 
@@ -2165,9 +2302,9 @@ y+6,
 
 ctx.fillRect(
 
-x+16,
+x + 16,
 
-y+6,
+y + 6,
 
 4,
 
@@ -2176,15 +2313,17 @@ y+6,
 );
 
 
+// =====================================================
 // NOSE
+// =====================================================
 
-ctx.fillStyle="#222";
+ctx.fillStyle = "#222222";
 
 ctx.fillRect(
 
-x+12,
+x + 12,
 
-y+10,
+y + 10,
 
 4,
 
@@ -2193,15 +2332,17 @@ y+10,
 );
 
 
+// =====================================================
 // LEGS
+// =====================================================
 
-ctx.fillStyle="#666";
+ctx.fillStyle = "#666666";
 
 ctx.fillRect(
 
-x+5,
+x + 5,
 
-y+25,
+y + 25,
 
 5,
 
@@ -2211,9 +2352,9 @@ y+25,
 
 ctx.fillRect(
 
-x+15,
+x + 15,
 
-y+25,
+y + 25,
 
 5,
 
@@ -2222,17 +2363,19 @@ y+25,
 );
 
 
+// =====================================================
 // FLYING EFFECT
+// =====================================================
 
 if(flying){
 
-ctx.fillStyle="#ffe66d";
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x-5,
+x - 5,
 
-y+7,
+y + 7,
 
 3,
 
@@ -2242,9 +2385,9 @@ y+7,
 
 ctx.fillRect(
 
-x+25,
+x + 25,
 
-y+7,
+y + 7,
 
 3,
 
@@ -2255,7 +2398,9 @@ y+7,
 }
 
 
+// =====================================================
 // LASER
+// =====================================================
 
 if(
 
@@ -2265,13 +2410,13 @@ input.jump
 
 ){
 
-ctx.fillStyle="#ff4040";
+ctx.fillStyle = "#ff4040";
 
 ctx.fillRect(
 
-x+24,
+x + 24,
 
-y+9,
+y + 9,
 
 55,
 
@@ -2279,13 +2424,14 @@ y+9,
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffffff";
 
 ctx.fillRect(
 
-x+27,
+x + 27,
 
-y+10,
+y + 10,
 
 48,
 
@@ -2304,25 +2450,44 @@ y+10,
 
 function drawStart(){
 
-ctx.fillStyle="#65c9ff";
+ctx.fillStyle = "#65c9ff";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffe76a";
+
+// SUN
+
+ctx.fillStyle = "#ffe76a";
 
 ctx.fillRect(
 
-380,25,40,40
+380,
+
+25,
+
+40,
+
+40
 
 );
 
-ctx.fillStyle="#fff";
 
-ctx.font=
+// TITLE
+
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
 "bold 30px monospace";
 
 ctx.fillText(
@@ -2335,7 +2500,11 @@ ctx.fillText(
 
 );
 
-ctx.font=
+
+// SUBTITLE
+
+ctx.font =
+
 "14px monospace";
 
 ctx.fillText(
@@ -2348,33 +2517,73 @@ ctx.fillText(
 
 );
 
-ctx.font=
-"16px monospace";
 
-ctx.fillStyle="#ffe66d";
+// INSTRUCTION BOX
 
-ctx.fillText(
+ctx.fillStyle = "#101522";
 
-"PRESS ENTER TO START",
+ctx.fillRect(
 
-125,
+95,
 
-215
+145,
+
+290,
+
+70
 
 );
 
-ctx.font=
-"11px monospace";
 
-ctx.fillStyle="#fff";
+ctx.strokeStyle = "#ffe45c";
+
+ctx.lineWidth = 3;
+
+ctx.strokeRect(
+
+95,
+
+145,
+
+290,
+
+70
+
+);
+
+
+// START TEXT
+
+ctx.fillStyle = "#ffe66d";
+
+ctx.font =
+
+"bold 16px monospace";
 
 ctx.fillText(
 
-"ARROW KEYS TO MOVE • SPACE TO JUMP",
+"PRESS CENTER BUTTON",
 
-115,
+125,
 
-238
+180
+
+);
+
+
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
+"11px monospace";
+
+ctx.fillText(
+
+"TO START THE GAME",
+
+165,
+
+200
 
 );
 
@@ -2387,13 +2596,14 @@ ctx.fillText(
 
 function draw(){
 
-if(state==="START"){
+if(state === "START"){
 
 drawStart();
 
 return;
 
 }
+
 
 drawBackground();
 
@@ -2407,10 +2617,13 @@ drawEnemies();
 
 drawPlayer();
 
-ctx.fillStyle="#fff";
 
-ctx.font=
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
 "12px monospace";
+
 
 ctx.fillText(
 
@@ -2426,7 +2639,7 @@ ctx.fillText(
 
 
 // =====================================================
-// MAIN LOOP
+// MAIN GAME LOOP
 // =====================================================
 
 function gameLoop(){
@@ -2450,3 +2663,412 @@ gameLoop();
 </body>
 
 </html>
+
+)rawliteral";
+
+
+// =====================================================
+// HOME ROUTE
+// =====================================================
+
+void handleHome(){
+
+server.send_P(
+
+200,
+
+"text/html",
+
+GAME_PAGE
+
+);
+
+}
+
+
+// =====================================================
+// CONTROLLER API
+// =====================================================
+
+void handleController(){
+
+int x =
+
+analogRead(joystickX);
+
+
+bool jumpPressed =
+
+digitalRead(jumpButton) == LOW;
+
+
+bool flyPressed =
+
+digitalRead(flyButton) == LOW;
+
+
+bool centerPressed =
+
+digitalRead(centerButton) == LOW;
+
+
+String direction = "CENTER";
+
+
+if(x < 350){
+
+direction = "LEFT";
+
+}
+
+else if(x > 700){
+
+direction = "RIGHT";
+
+}
+
+
+// =====================================================
+// JSON RESPONSE
+// =====================================================
+
+String json = "{";
+
+
+json += "\"direction\":\"";
+
+json += direction;
+
+json += "\",";
+
+
+json += "\"jump\":";
+
+json +=
+
+jumpPressed ?
+
+"true" :
+
+"false";
+
+
+json += ",";
+
+
+json += "\"fly\":";
+
+json +=
+
+flyPressed ?
+
+"true" :
+
+"false";
+
+
+json += ",";
+
+
+json += "\"reset\":";
+
+json +=
+
+centerPressed ?
+
+"true" :
+
+"false";
+
+
+json += ",";
+
+
+json += "\"pause\":";
+
+json +=
+
+centerPressed ?
+
+"true" :
+
+"false";
+
+
+json += "}";
+
+
+server.sendHeader(
+
+"Access-Control-Allow-Origin",
+
+"*"
+
+);
+
+
+server.sendHeader(
+
+"Cache-Control",
+
+"no-store"
+
+);
+
+
+server.send(
+
+200,
+
+"application/json",
+
+json
+
+);
+
+}
+
+
+// =====================================================
+// OPTIONS
+// =====================================================
+
+void handleOptions(){
+
+server.sendHeader(
+
+"Access-Control-Allow-Origin",
+
+"*"
+
+);
+
+
+server.sendHeader(
+
+"Access-Control-Allow-Methods",
+
+"GET, OPTIONS"
+
+);
+
+
+server.sendHeader(
+
+"Access-Control-Allow-Headers",
+
+"Content-Type"
+
+);
+
+
+server.send(
+
+204,
+
+"text/plain",
+
+""
+
+);
+
+}
+
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup(){
+
+Serial.begin(115200);
+
+delay(500);
+
+
+// =====================================================
+// BUTTONS
+// =====================================================
+
+pinMode(
+
+jumpButton,
+
+INPUT_PULLUP
+
+);
+
+
+pinMode(
+
+flyButton,
+
+INPUT_PULLUP
+
+);
+
+
+pinMode(
+
+centerButton,
+
+INPUT_PULLUP
+
+);
+
+
+// =====================================================
+// START SERIAL
+// =====================================================
+
+Serial.println();
+
+Serial.println(
+
+"================================"
+
+);
+
+Serial.println(
+
+"       NEXUS RACCOON"
+
+);
+
+Serial.println(
+
+"================================"
+
+);
+
+
+// =====================================================
+// WIFI
+// =====================================================
+
+WiFi.mode(
+
+WIFI_STA
+
+);
+
+
+WiFi.begin(
+
+ssid,
+
+password
+
+);
+
+
+Serial.print(
+
+"Connecting to Wi-Fi"
+
+);
+
+
+while(
+
+WiFi.status() != WL_CONNECTED
+
+){
+
+delay(500);
+
+Serial.print(".");
+
+}
+
+
+Serial.println();
+
+Serial.println(
+
+"Wi-Fi CONNECTED!"
+
+);
+
+
+Serial.print(
+
+"NEXUS IP: "
+
+);
+
+Serial.println(
+
+WiFi.localIP()
+
+);
+
+
+// =====================================================
+// ROUTES
+// =====================================================
+
+server.on(
+
+"/",
+
+HTTP_GET,
+
+handleHome
+
+);
+
+
+server.on(
+
+"/controller",
+
+HTTP_GET,
+
+handleController
+
+);
+
+
+server.on(
+
+"/controller",
+
+HTTP_OPTIONS,
+
+handleOptions
+
+);
+
+
+// =====================================================
+// SERVER
+// =====================================================
+
+server.begin();
+
+
+Serial.println(
+
+"NEXUS SERVER STARTED!"
+
+);
+
+Serial.println(
+
+"Open the IP address shown above."
+
+);
+
+}
+
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop(){
+
+server.handleClient();
+
+}
