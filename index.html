@@ -34,7 +34,9 @@ overflow:hidden;
 body{
 
 display:flex;
+
 align-items:center;
+
 justify-content:center;
 
 }
@@ -42,6 +44,7 @@ justify-content:center;
 #container{
 
 width:96vw;
+
 max-width:900px;
 
 text-align:center;
@@ -53,6 +56,8 @@ text-align:center;
 display:flex;
 
 justify-content:space-between;
+
+align-items:center;
 
 flex-wrap:wrap;
 
@@ -69,6 +74,12 @@ border-radius:10px;
 font-size:13px;
 
 font-weight:bold;
+
+}
+
+#hud div{
+
+white-space:nowrap;
 
 }
 
@@ -108,6 +119,8 @@ font-size:11px;
 
 color:#bfc7e8;
 
+line-height:1.5;
+
 }
 
 #message{
@@ -128,7 +141,7 @@ border-radius:12px;
 
 padding:22px;
 
-min-width:280px;
+min-width:300px;
 
 display:none;
 
@@ -139,6 +152,28 @@ font-size:17px;
 line-height:1.6;
 
 box-shadow:0 0 30px #000;
+
+text-align:left;
+
+}
+
+.messageTitle{
+
+font-size:20px;
+
+font-weight:bold;
+
+color:#ffe45c;
+
+text-align:center;
+
+margin-bottom:15px;
+
+}
+
+.messageText{
+
+text-align:left;
 
 }
 
@@ -153,9 +188,13 @@ box-shadow:0 0 30px #000;
 <div id="container">
 
 
+<!-- =================================================
+HUD
+================================================= -->
+
 <div id="hud">
 
-<div>🦝 NEXUS</div>
+<div>NEXUS</div>
 
 <div>
 SCORE:
@@ -163,18 +202,28 @@ SCORE:
 </div>
 
 <div>
-HIGH:
+BEST:
 <span id="high">0</span>
 </div>
 
 <div>
-❤️
+COINS:
+<span id="coins">0</span>
+</div>
+
+<div>
+DIST:
+<span id="distance">0</span>
+</div>
+
+<div>
+LIVES:
 <span id="lives">3</span>
 </div>
 
 <div>
-🍕
-<span id="pizza">0</span>/3
+PIZZAS:
+<span id="pizza">0</span>
 </div>
 
 <div id="status">
@@ -184,6 +233,10 @@ READY
 </div>
 
 
+<!-- =================================================
+GAME CANVAS
+================================================= -->
+
 <canvas
 id="game"
 width="480"
@@ -191,27 +244,29 @@ height="270">
 </canvas>
 
 
+<!-- =================================================
+CONTROLS
+================================================= -->
+
 <div id="controls">
 
 JOYSTICK LEFT / RIGHT
-
 &nbsp; | &nbsp;
-
-CENTER = START / RESET / PAUSE
-
+CENTER = LASER
 &nbsp; | &nbsp;
-
-D1 = JUMP / LASER
-
+D3 = JUMP
 &nbsp; | &nbsp;
-
-D4 = FLY
+D4 = FLY &nbsp; | &nbsp; D5 = RESET &nbsp; | &nbsp; D6 = PAUSE
 
 </div>
 
 
 </div>
 
+
+<!-- =================================================
+MESSAGE BOX
+================================================= -->
 
 <div id="message"></div>
 
@@ -229,14 +284,14 @@ document.getElementById("game");
 const ctx =
 canvas.getContext("2d");
 
-ctx.imageSmoothingEnabled=false;
+ctx.imageSmoothingEnabled = false;
 
 
 // =====================================================
-// CONTROLLER
+// CONTROLLER INPUT
 // =====================================================
 
-let input={
+let input = {
 
 direction:"CENTER",
 
@@ -246,12 +301,14 @@ fly:false,
 
 reset:false,
 
-pause:false
+pause:false,
+
+center:false
 
 };
 
 
-let previous={
+let previous = {
 
 jump:false,
 
@@ -259,7 +316,9 @@ fly:false,
 
 reset:false,
 
-pause:false
+pause:false,
+
+center:false
 
 };
 
@@ -268,48 +327,43 @@ pause:false
 // GAME STATE
 // =====================================================
 
-let state="START";
-
-let score=0;
-
-let lives=3;
-
-let pizzaCount=0;
-
-let highScore=
-
-Number(
-localStorage.getItem("nexusHighScore") || 0
-);
-
-let cameraX=0;
-
-let flightUnlocked=false;
-
-let flying=false;
-
-let flightTime=0;
-
+let state = "START";
+let score = 0;
+let lives = 3;
+let pizzaCount = 0;
+let pizzasCollectedTotal = 0;
+let coinsCollected = 0;
+let distanceScore = 0;
+let highScore = Number(localStorage.getItem("nexusHighScore") || 0);
+let leaderboard = JSON.parse(localStorage.getItem("nexusLeaderboard") || "[]");
+let cameraX = 0;
+let flightUnlocked = false;
+let flying = false;
+let flightTime = 0;
+let laserTime = 0;
+let lasers = [];
+let boss = {x: 5400, y: 150, width: 58, height: 65, hp: 8, maxHp: 8, active:false, defeated:false, vx:0.7, dir:1};
+let gameDistance = 0;
+let lastShot = 0;
 
 // =====================================================
 // SOUND
 // =====================================================
 
-let audioContext=null;
+let audioContext = null;
 
 
 function beep(
 
-frequency=600,
+frequency = 600,
 
-duration=0.08
+duration = 0.08
 
 ){
 
 try{
 
-audioContext=
-
+audioContext =
 audioContext ||
 
 new(
@@ -317,44 +371,56 @@ window.AudioContext ||
 window.webkitAudioContext
 )();
 
-let oscillator=
+
+let oscillator =
 audioContext.createOscillator();
 
-let gain=
+
+let gain =
 audioContext.createGain();
 
-oscillator.type="square";
 
-oscillator.frequency.value=
+oscillator.type = "square";
+
+oscillator.frequency.value =
 frequency;
 
-gain.gain.value=0.035;
+
+gain.gain.value = 0.035;
+
 
 oscillator.connect(gain);
 
-gain.connect(audioContext.destination);
+gain.connect(
+audioContext.destination
+);
+
 
 oscillator.start();
+
 
 gain.gain.exponentialRampToValueAtTime(
 
 0.001,
 
-audioContext.currentTime+
+audioContext.currentTime +
 duration
 
 );
 
+
 oscillator.stop(
 
-audioContext.currentTime+
+audioContext.currentTime +
 duration
 
 );
 
 }
 
-catch(e){}
+catch(e){
+
+}
 
 }
 
@@ -367,11 +433,12 @@ async function readController(){
 
 try{
 
-let response=
+let response =
 
 await fetch(
 
-"/controller?time="+Date.now(),
+"/controller?time=" +
+Date.now(),
 
 {
 
@@ -381,7 +448,8 @@ cache:"no-store"
 
 );
 
-input=
+
+input =
 await response.json();
 
 }
@@ -389,7 +457,7 @@ await response.json();
 catch(error){
 
 // ESP8266 temporarily unavailable.
-// Game continues safely.
+// Game continues.
 
 }
 
@@ -406,7 +474,7 @@ readController,
 
 
 // =====================================================
-// BUTTON EDGE
+// BUTTON EDGE DETECTION
 // =====================================================
 
 function pressed(button){
@@ -426,23 +494,45 @@ previous[button] !== true
 // MESSAGE
 // =====================================================
 
-function showMessage(text){
+function showMessage(
 
-let message=
+title,
 
-document.getElementById("message");
+text
 
-message.innerHTML=text;
+){
 
-message.style.display="block";
+let message =
+document.getElementById(
+"message"
+);
+
+
+message.innerHTML =
+
+"<div class='messageTitle'>" +
+
+title +
+
+"</div>" +
+
+"<div class='messageText'>" +
+
+text +
+
+"</div>";
+
+
+message.style.display = "block";
 
 }
 
 
 function hideMessage(){
 
-document.getElementById("message")
-.style.display="none";
+document.getElementById(
+"message"
+).style.display = "none";
 
 }
 
@@ -451,7 +541,7 @@ document.getElementById("message")
 // PLAYER
 // =====================================================
 
-let player={
+let player = {
 
 x:45,
 
@@ -471,122 +561,40 @@ onGround:false
 
 
 // =====================================================
-// PLATFORMS
+// LONGER WORLD
 // =====================================================
 
-const platforms=[
-
-{x:0,y:235,w:220,h:35},
-
-{x:255,y:210,w:130,h:60},
-
-{x:420,y:190,w:130,h:80},
-
-{x:590,y:220,w:140,h:50},
-
-{x:770,y:180,w:140,h:90},
-
-{x:950,y:210,w:140,h:60},
-
-{x:1130,y:185,w:150,h:85},
-
-{x:1320,y:215,w:140,h:55},
-
-{x:1500,y:175,w:160,h:95},
-
-{x:1700,y:210,w:150,h:60},
-
-{x:1880,y:180,w:180,h:90}
-
+const platforms = [
+{x:0,y:235,w:260,h:35},{x:290,y:215,w:170,h:55},{x:500,y:190,w:150,h:80},
+{x:690,y:220,w:170,h:50},{x:900,y:180,w:150,h:90},{x:1090,y:215,w:170,h:55},
+{x:1300,y:185,w:180,h:85},{x:1510,y:220,w:160,h:50},{x:1710,y:175,w:190,h:95},
+{x:1940,y:210,w:170,h:60},{x:2150,y:180,w:180,h:90},{x:2380,y:220,w:180,h:50},
+{x:2600,y:175,w:180,h:95},{x:2830,y:205,w:170,h:65},{x:3040,y:160,w:200,h:110},
+{x:3290,y:215,w:180,h:55},{x:3520,y:180,w:190,h:90},{x:3760,y:220,w:180,h:50},
+{x:3990,y:165,w:200,h:105},{x:4240,y:210,w:180,h:60},{x:4470,y:180,w:190,h:90},
+{x:4710,y:220,w:190,h:50},{x:4950,y:175,w:220,h:95},{x:5220,y:205,w:240,h:65},
+{x:5520,y:190,w:220,h:80},{x:5800,y:220,w:300,h:50}
 ];
 
+let coins = [];
+for(let i=0;i<115;i++){ coins.push({x:80+i*50,y:125-(i%5)*14,collected:false}); }
 
-// =====================================================
-// COINS
-// =====================================================
-
-let coins=[];
-
-for(
-
-let i=0;
-
-i<36;
-
-i++
-
-){
-
-coins.push({
-
-x:80+i*55,
-
-y:145-(i%4)*18,
-
-collected:false
-
-});
-
-}
-
-
-// =====================================================
-// PIZZAS
-// =====================================================
-
-let pizzas=[
-
-{x:300,y:175,collected:false},
-
-{x:690,y:185,collected:false},
-
-{x:1030,y:175,collected:false},
-
-{x:1370,y:180,collected:false},
-
-{x:1550,y:140,collected:false},
-
-{x:1900,y:145,collected:false}
-
+let pizzas = [
+{x:360,y:175,collected:false},{x:1020,y:145,collected:false},{x:1560,y:175,collected:false},
+{x:2220,y:145,collected:false},{x:2860,y:170,collected:false},{x:3500,y:145,collected:false},
+{x:4140,y:150,collected:false},{x:4750,y:175,collected:false},{x:5150,y:155,collected:false},{x:5650,y:150,collected:false}
 ];
 
-
-// =====================================================
-// ENEMIES
-// =====================================================
-
-let enemies=[
-
-{
-
-x:650,
-
-y:185,
-
-width:18,
-
-height:25,
-
-vx:0.45
-
-},
-
-{
-
-x:1200,
-
-y:175,
-
-width:18,
-
-height:25,
-
-vx:-0.5
-
-}
-
+let enemies = [
+{x:620,y:165,width:18,height:25,vx:0.55,min:540,max:790,dir:1},
+{x:1160,y:185,width:18,height:25,vx:0.48,min:1110,max:1260,dir:1},
+{x:1760,y:145,width:18,height:25,vx:0.52,min:1690,max:1870,dir:1},
+{x:2360,y:190,width:18,height:25,vx:0.50,min:2290,max:2500,dir:-1},
+{x:3000,y:135,width:18,height:25,vx:0.58,min:2930,max:3200,dir:1},
+{x:3650,y:155,width:18,height:25,vx:0.55,min:3570,max:3740,dir:-1},
+{x:4300,y:185,width:18,height:25,vx:0.50,min:4230,max:4400,dir:1},
+{x:4870,y:150,width:18,height:25,vx:0.58,min:4760,max:5050,dir:-1}
 ];
-
 
 // =====================================================
 // COLLISION
@@ -596,13 +604,13 @@ function collision(a,b){
 
 return(
 
-a.x < b.x+b.width &&
+a.x < b.x + b.width &&
 
-a.x+a.width > b.x &&
+a.x + a.width > b.x &&
 
-a.y < b.y+b.height &&
+a.y < b.y + b.height &&
 
-a.y+a.height > b.y
+a.y + a.height > b.y
 
 );
 
@@ -610,772 +618,149 @@ a.y+a.height > b.y
 
 
 // =====================================================
-// START / RESET
+// RESET / LEADERBOARD
 // =====================================================
+
+function saveRun(){
+  const entry={score:score,coins:coinsCollected,distance:Math.floor(gameDistance)};
+  leaderboard.push(entry);
+  leaderboard.sort((a,b)=>b.score-a.score);
+  leaderboard=leaderboard.slice(0,5);
+  localStorage.setItem("nexusLeaderboard",JSON.stringify(leaderboard));
+  if(score>highScore){ highScore=score; localStorage.setItem("nexusHighScore",highScore); }
+}
+
+function leaderboardHTML(){
+  let h="<br><b>LEADERBOARD</b><br>";
+  if(!leaderboard.length) return h+"No runs yet";
+  leaderboard.forEach((r,i)=>{ h+=(i+1)+". "+r.score+" pts | "+r.coins+" coins | "+r.distance+"m<br>"; });
+  return h;
+}
 
 function resetGame(){
-
-state="PLAYING";
-
-score=0;
-
-lives=3;
-
-pizzaCount=0;
-
-flightUnlocked=false;
-
-flying=false;
-
-flightTime=0;
-
-cameraX=0;
-
-player.x=45;
-
-player.y=100;
-
-player.vx=0;
-
-player.vy=0;
-
-player.onGround=false;
-
-
-coins.forEach(
-
-coin=>coin.collected=false
-
-);
-
-
-pizzas.forEach(
-
-pizza=>pizza.collected=false
-
-);
-
-
-enemies=[
-
-{
-
-x:650,
-
-y:185,
-
-width:18,
-
-height:25,
-
-vx:0.45
-
-},
-
-{
-
-x:1200,
-
-y:175,
-
-width:18,
-
-height:25,
-
-vx:-0.5
-
+  state="PLAYING"; score=0; lives=3; pizzaCount=0; pizzasCollectedTotal=0; coinsCollected=0; distanceScore=0;
+  flightUnlocked=false; flying=false; flightTime=0; laserTime=0; lasers=[]; cameraX=0; gameDistance=0; lastShot=0;
+  player.x=45; player.y=100; player.vx=0; player.vy=0; player.onGround=false;
+  coins.forEach(c=>c.collected=false); pizzas.forEach(p=>p.collected=false);
+  enemies=[
+    {x:620,y:165,width:18,height:25,vx:0.55,min:540,max:790,dir:1},{x:1160,y:185,width:18,height:25,vx:0.48,min:1110,max:1260,dir:1},
+    {x:1760,y:145,width:18,height:25,vx:0.52,min:1690,max:1870,dir:1},{x:2360,y:190,width:18,height:25,vx:0.50,min:2290,max:2500,dir:-1},
+    {x:3000,y:135,width:18,height:25,vx:0.58,min:2930,max:3200,dir:1},{x:3650,y:155,width:18,height:25,vx:0.55,min:3570,max:3740,dir:-1},
+    {x:4300,y:185,width:18,height:25,vx:0.50,min:4230,max:4400,dir:1},{x:4870,y:150,width:18,height:25,vx:0.58,min:4760,max:5050,dir:-1}
+  ];
+  boss={x:5400,y:140,width:58,height:65,hp:8,maxHp:8,active:false,defeated:false,vx:0.7,dir:1};
+  hideMessage(); beep(700,0.1); updateHUD();
 }
 
-];
+function gameOver(){ saveRun(); state="GAMEOVER"; updateHUD(); showMessage("GAME OVER","SCORE: "+score+"<br>COINS: "+coinsCollected+"<br>DISTANCE: "+Math.floor(gameDistance)+"m"+leaderboardHTML()+"<br><br>PRESS D5 TO RESET"); }
 
-
-hideMessage();
-
-beep(700,0.1);
-
-updateHUD();
-
+function victory(){
+  if(state!=="PLAYING") return;
+  state="VICTORY"; saveRun(); beep(1200,0.25);
+  showMessage("BOSS DEFEATED","FINAL SCORE: "+score+"<br>COINS: "+coinsCollected+"<br>DISTANCE: "+Math.floor(gameDistance)+"m"+leaderboardHTML()+"<br><br>PRESS D5 TO RESET");
 }
-
-
-// =====================================================
-// GAME OVER
-// =====================================================
-
-function gameOver(){
-
-if(score>highScore){
-
-highScore=score;
-
-localStorage.setItem(
-
-"nexusHighScore",
-
-highScore
-
-);
-
-}
-
-state="GAMEOVER";
-
-updateHUD();
-
-showMessage(
-
-"💀 GAME OVER<br><br>"+
-
-"SCORE: "+score+
-
-"<br>"+
-
-"HIGH SCORE: "+highScore+
-
-"<br><br>"+
-
-"CENTER BUTTON = RESET"
-
-);
-
-}
-
-
-// =====================================================
-// PLAYER HIT
-// =====================================================
 
 function hitPlayer(){
-
-if(flying){
-
-return;
-
+  if(flying) return;
+  lives--; beep(150,0.15);
+  if(lives<=0){ gameOver(); return; }
+  player.x=Math.max(45,player.x-150); player.y=100; player.vx=0; player.vy=0; updateHUD();
 }
 
-lives--;
-
-beep(150,0.15);
-
-if(lives<=0){
-
-gameOver();
-
-return;
-
+function shootLaser(){
+  if(state!=="PLAYING" || laserTime<=0) return;
+  const now=performance.now(); if(now-lastShot<260) return; lastShot=now;
+  lasers.push({x:player.x+player.width,y:player.y+12,w:90,life:18}); beep(1050,0.04);
 }
-
-player.x-=120;
-
-if(player.x<45){
-
-player.x=45;
-
-}
-
-player.y=100;
-
-player.vx=0;
-
-player.vy=0;
-
-updateHUD();
-
-}
-
-
-// =====================================================
-// UPDATE
-// =====================================================
 
 function update(){
+  // D5 is the dedicated reset and works from every screen.
+  if(pressed("reset")){ resetGame(); previous=Object.assign({},input); return; }
+  if(pressed("pause")){
+    if(state==="PLAYING"){state="PAUSED";showMessage("GAME PAUSED","D6 PAUSE / RESUME");}
+    else if(state==="PAUSED"){state="PLAYING";hideMessage();}
+    previous=Object.assign({},input); return;
+  }
+  // Joystick center is now LASER, never reset.
+  if(pressed("center")) shootLaser();
+  if(state!=="PLAYING"){ previous=Object.assign({},input); return; }
 
+  if(input.direction==="LEFT") player.vx=-1.25;
+  else if(input.direction==="RIGHT") player.vx=1.25;
+  else player.vx*=0.78;
 
-// -----------------------------------------------------
-// CENTER BUTTON
-// -----------------------------------------------------
+  if(pressed("fly") && flightUnlocked && !flying){flying=true;flightTime=720;beep(850,0.1);}
+  if(flying){
+    flightTime-=16; player.vy=-0.20;
+    if(input.direction==="RIGHT") player.vx=1.55; else if(input.direction==="LEFT") player.vx=-1.55;
+    if(flightTime<=0){flying=false;flightTime=0;beep(250,0.1);}
+  } else player.vy+=0.42;
 
-if(pressed("reset")){
+  if(pressed("jump") && player.onGround && !flying){player.vy=-7.4;beep(500,0.08);}
+  player.x+=player.vx; player.y+=player.vy;
+  if(player.x<0) player.x=0;
 
-if(state==="PAUSED"){
+  player.onGround=false;
+  if(!flying){for(const platform of platforms){if(player.x<platform.x+platform.w && player.x+player.width>platform.x && player.y+player.height>=platform.y && player.y+player.height<=platform.y+18 && player.vy>=0){player.y=platform.y-player.height;player.vy=0;player.onGround=true;}}}
 
-state="PLAYING";
+  for(const coin of coins){if(!coin.collected && collision(player,{x:coin.x,y:coin.y,width:12,height:12})){coin.collected=true;coinsCollected++;score+=25;beep(900,0.035);}}
 
-hideMessage();
+  for(const pizza of pizzas){
+    if(!pizza.collected && collision(player,{x:pizza.x,y:pizza.y,width:16,height:14})){
+      pizza.collected=true; pizzaCount++; pizzasCollectedTotal++; score+=150; beep(1100,0.08);
+      if(pizzasCollectedTotal>=4) flightUnlocked=true;
+      if(pizzaCount>=2){
+        pizzaCount-=2; laserTime=600; score+=25; beep(1350,0.12);
+        showMessage("LASER READY","10 SEC - CENTER TO FIRE"); setTimeout(()=>{if(state==="PLAYING") hideMessage();},900);
+      }
+    }
+  }
 
-beep(700,0.08);
+  if(laserTime>0) laserTime-=1;
+  if(input.center) shootLaser();
+  for(const l of lasers){l.x+=6;l.life--;} lasers=lasers.filter(l=>l.life>0);
 
+  for(const enemy of enemies){
+    enemy.x += enemy.vx*enemy.dir;
+    if(enemy.x<enemy.min){enemy.x=enemy.min;enemy.dir=1;} if(enemy.x>enemy.max){enemy.x=enemy.max;enemy.dir=-1;}
+    if(collision(player,{x:enemy.x,y:enemy.y,width:enemy.width,height:enemy.height})&&!flying) hitPlayer();
+    for(const l of lasers){if(collision(l,{x:enemy.x,y:enemy.y,width:enemy.width,height:enemy.height})){enemy.dead=true;l.life=0;score+=10;beep(700,0.06);}}
+  }
+  enemies=enemies.filter(e=>!e.dead);
+
+  // Final boss zone: enter at 5400, fight with the 10-second laser windows.
+  if(player.x>5200) boss.active=true;
+  if(boss.active&&!boss.defeated){
+    boss.y=145+Math.sin(performance.now()/350)*35; boss.x+=boss.vx*boss.dir;
+    if(boss.x<5310||boss.x>5550) boss.dir*=-1;
+    for(const l of lasers){if(collision(l,{x:boss.x,y:boss.y,width:boss.width,height:boss.height})){l.life=0;boss.hp--;score+=5;beep(780,0.05);}}
+    if(boss.hp<=0){boss.defeated=true;score+=100;victory();}
+    if(collision(player,{x:boss.x,y:boss.y,width:boss.width,height:boss.height})&&!flying) hitPlayer();
+  }
+
+  if(player.y>330) hitPlayer();
+  gameDistance=Math.max(gameDistance,player.x);
+  distanceScore=Math.floor(gameDistance/10);
+  score=Math.max(score,coinsCollected*25+distanceScore+pizzasCollectedTotal*150+(boss.defeated?100:0));
+  cameraX=Math.max(0,player.x-110);
+
+  previous=Object.assign({},input); updateHUD();
 }
-
-else if(
-
-state==="GAMEOVER" ||
-
-state==="VICTORY"
-
-){
-
-resetGame();
-
-}
-
-else if(state==="START"){
-
-resetGame();
-
-}
-
-else{
-
-state="PAUSED";
-
-showMessage(
-
-"⏸ PAUSED<br><br>"+
-
-"CENTER BUTTON = RESUME"
-
-);
-
-beep(400,0.08);
-
-}
-
-previous=
-Object.assign({},input);
-
-return;
-
-}
-
-
-// -----------------------------------------------------
-// START SCREEN
-// -----------------------------------------------------
-
-if(state==="START"){
-
-if(
-
-input.direction==="CENTER" ||
-
-pressed("fly") ||
-
-pressed("jump")
-
-){
-
-resetGame();
-
-}
-
-previous=
-Object.assign({},input);
-
-return;
-
-}
-
-
-// -----------------------------------------------------
-// GAME OVER / VICTORY
-// -----------------------------------------------------
-
-if(
-
-state==="GAMEOVER" ||
-
-state==="VICTORY"
-
-){
-
-previous=
-Object.assign({},input);
-
-return;
-
-}
-
-
-// -----------------------------------------------------
-// PAUSED
-// -----------------------------------------------------
-
-if(state==="PAUSED"){
-
-previous=
-Object.assign({},input);
-
-return;
-
-}
-
-
-// =====================================================
-// MOVEMENT
-// =====================================================
-
-if(
-
-input.direction==="LEFT"
-
-){
-
-player.vx=-1.6;
-
-}
-
-else if(
-
-input.direction==="RIGHT"
-
-){
-
-player.vx=1.6;
-
-}
-
-else{
-
-player.vx*=0.78;
-
-}
-
-
-// =====================================================
-// FLY
-// =====================================================
-
-if(
-
-pressed("fly") &&
-
-flightUnlocked &&
-
-!flying
-
-){
-
-flying=true;
-
-flightTime=900;
-
-beep(850,0.1);
-
-}
-
-
-if(flying){
-
-flightTime-=16;
-
-player.vy=-0.25;
-
-if(
-
-input.direction==="RIGHT"
-
-){
-
-player.vx=2;
-
-}
-
-else if(
-
-input.direction==="LEFT"
-
-){
-
-player.vx=-2;
-
-}
-
-if(
-
-flightTime<=0
-
-){
-
-flying=false;
-
-flightTime=0;
-
-beep(250,0.1);
-
-}
-
-}
-
-else{
-
-player.vy+=0.45;
-
-}
-
-
-// =====================================================
-// JUMP
-// =====================================================
-
-if(
-
-pressed("jump") &&
-
-player.onGround &&
-
-!flying
-
-){
-
-player.vy=-8;
-
-beep(500,0.08);
-
-}
-
-
-// =====================================================
-// POSITION
-// =====================================================
-
-player.x+=player.vx;
-
-player.y+=player.vy;
-
-
-// =====================================================
-// PLATFORM COLLISION
-// =====================================================
-
-player.onGround=false;
-
-if(!flying){
-
-for(
-
-const platform of platforms
-
-){
-
-if(
-
-player.x <
-platform.x+platform.w &&
-
-player.x+player.width >
-platform.x &&
-
-player.y+player.height >=
-platform.y &&
-
-player.y+player.height <=
-platform.y+18 &&
-
-player.vy>=0
-
-){
-
-player.y=
-platform.y-player.height;
-
-player.vy=0;
-
-player.onGround=true;
-
-}
-
-}
-
-}
-
-
-// =====================================================
-// COINS
-// =====================================================
-
-for(
-
-const coin of coins
-
-){
-
-if(!coin.collected){
-
-if(
-
-collision(
-
-player,
-
-{
-
-x:coin.x,
-
-y:coin.y,
-
-width:12,
-
-height:12
-
-}
-
-)
-
-){
-
-coin.collected=true;
-
-score+=25;
-
-beep(900,0.035);
-
-}
-
-}
-
-}
-
-
-// =====================================================
-// PIZZAS
-// =====================================================
-
-for(
-
-const pizza of pizzas
-
-){
-
-if(!pizza.collected){
-
-if(
-
-collision(
-
-player,
-
-{
-
-x:pizza.x,
-
-y:pizza.y,
-
-width:16,
-
-height:14
-
-}
-
-)
-
-){
-
-pizza.collected=true;
-
-pizzaCount++;
-
-score+=150;
-
-beep(1100,0.08);
-
-if(pizzaCount>=3){
-
-flightUnlocked=true;
-
-beep(1300,0.15);
-
-}
-
-}
-
-}
-
-}
-
-
-// =====================================================
-// ENEMIES
-// =====================================================
-
-for(
-
-const enemy of enemies
-
-){
-
-enemy.x+=enemy.vx;
-
-if(enemy.x<500){
-
-enemy.vx=
-Math.abs(enemy.vx);
-
-}
-
-if(enemy.x>1900){
-
-enemy.vx=
--Math.abs(enemy.vx);
-
-}
-
-if(
-
-collision(
-
-player,
-
-{
-
-x:enemy.x,
-
-y:enemy.y,
-
-width:enemy.width,
-
-height:enemy.height
-
-}
-
-) &&
-
-!flying
-
-){
-
-hitPlayer();
-
-}
-
-}
-
-
-// =====================================================
-// FALL
-// =====================================================
-
-if(player.y>330){
-
-hitPlayer();
-
-}
-
-
-// =====================================================
-// CAMERA
-// =====================================================
-
-cameraX=
-
-Math.max(
-
-0,
-
-player.x-110
-
-);
-
-
-// =====================================================
-// FINISH
-// =====================================================
-
-if(player.x>1980){
-
-state="VICTORY";
-
-if(score>highScore){
-
-highScore=score;
-
-localStorage.setItem(
-
-"nexusHighScore",
-
-highScore
-
-);
-
-}
-
-beep(1200,0.25);
-
-showMessage(
-
-"🏆 VICTORY!<br><br>"+
-
-"NEXUS RACCOON FINISHED!"+
-
-"<br><br>"+
-
-"SCORE: "+score+
-
-"<br>"+
-
-"HIGH SCORE: "+highScore+
-
-"<br><br>"+
-
-"CENTER BUTTON = RESET"
-
-);
-
-}
-
-
-// =====================================================
-// SAVE BUTTON STATE
-// =====================================================
-
-previous=
-Object.assign({},input);
-
-updateHUD();
-
-}
-
 
 // =====================================================
 // HUD
 // =====================================================
 
 function updateHUD(){
-
-document.getElementById("score")
-.textContent=score;
-
-document.getElementById("high")
-.textContent=highScore;
-
-document.getElementById("lives")
-.textContent=lives;
-
-document.getElementById("pizza")
-.textContent=pizzaCount;
-
-if(state==="PLAYING"){
-
-document.getElementById("status")
-.textContent=
-
-flying ? "FLYING" :
-
-flightUnlocked ?
-"FLIGHT READY" :
-"PLAYING";
-
+  document.getElementById("score").textContent=score;
+  document.getElementById("high").textContent=highScore;
+  document.getElementById("coins").textContent=coinsCollected;
+  document.getElementById("distance").textContent=Math.floor(gameDistance);
+  document.getElementById("lives").textContent=lives;
+  document.getElementById("pizza").textContent=pizzaCount;
+  if(state==="PLAYING") document.getElementById("status").textContent=laserTime>0?"LASER "+Math.ceil(laserTime/60)+"s":(boss.active?"BOSS":"PLAYING");
+  else document.getElementById("status").textContent=state;
 }
-
-else{
-
-document.getElementById("status")
-.textContent=state;
-
-}
-
-}
-
 
 // =====================================================
 // BACKGROUND
@@ -1383,39 +768,59 @@ document.getElementById("status")
 
 function drawBackground(){
 
-let environment=
+let environment =
 
-Math.floor(player.x/500);
+Math.floor(
+
+player.x / 500
+
+);
 
 
+// =====================================================
 // SKY
-// -----------------------------------------------------
+// =====================================================
 
-if(environment===0){
+if(environment === 0){
 
-ctx.fillStyle="#65c9ff";
-
-ctx.fillRect(
-
-0,0,480,270
-
-);
-
-ctx.fillStyle="#ffe76a";
+ctx.fillStyle = "#65c9ff";
 
 ctx.fillRect(
 
-390,25,35,35
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffe76a";
+
+ctx.fillRect(
+
+390,
+
+25,
+
+35,
+
+35
+
+);
+
+
+ctx.fillStyle = "#ffffff";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<4;
+i < 4;
 
 i++
 
@@ -1423,9 +828,9 @@ i++
 
 ctx.fillRect(
 
-50+i*120,
+50 + i * 120,
 
-55+(i%2)*25,
+55 + (i % 2) * 25,
 
 45,
 
@@ -1435,37 +840,53 @@ ctx.fillRect(
 
 }
 
-ctx.fillStyle="#4c9d4a";
+
+ctx.fillStyle = "#4c9d4a";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // SPACE
-// -----------------------------------------------------
+// =====================================================
 
-else if(environment===1){
+else if(environment === 1){
 
-ctx.fillStyle="#182c55";
+ctx.fillStyle = "#182c55";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffffff";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<25;
+i < 25;
 
 i++
 
@@ -1473,9 +894,9 @@ i++
 
 ctx.fillRect(
 
-(i*83)%480,
+(i * 83) % 480,
 
-(i*47)%200,
+(i * 47) % 200,
 
 3,
 
@@ -1485,83 +906,133 @@ ctx.fillRect(
 
 }
 
-ctx.fillStyle="#4c80c4";
+
+ctx.fillStyle = "#4c80c4";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // MOON
-// -----------------------------------------------------
+// =====================================================
 
-else if(environment===2){
+else if(environment === 2){
 
-ctx.fillStyle="#171329";
+ctx.fillStyle = "#171329";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ddd";
+
+ctx.fillStyle = "#dddddd";
 
 ctx.fillRect(
 
-365,30,55,55
+365,
+
+30,
+
+55,
+
+55
 
 );
 
-ctx.fillStyle="#777";
+
+ctx.fillStyle = "#777777";
 
 ctx.fillRect(
 
-375,42,10,10
+375,
+
+42,
+
+10,
+
+10
 
 );
 
 ctx.fillRect(
 
-400,65,9,9
+400,
+
+65,
+
+9,
+
+9
 
 );
 
-ctx.fillStyle="#555";
+
+ctx.fillStyle = "#555555";
 
 ctx.fillRect(
 
-0,225,480,45
+0,
+
+225,
+
+480,
+
+45
 
 );
 
 }
 
 
+// =====================================================
 // VOLCANO
-// -----------------------------------------------------
+// =====================================================
 
 else{
 
-ctx.fillStyle="#32151d";
+ctx.fillStyle = "#32151d";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#6d2525";
+
+ctx.fillStyle = "#6d2525";
+
 
 for(
 
-let i=0;
+let i = 0;
 
-i<8;
+i < 8;
 
 i++
 
@@ -1569,9 +1040,9 @@ i++
 
 ctx.fillRect(
 
-i*70,
+i * 70,
 
-145-(i%2)*20,
+145 - (i % 2) * 20,
 
 35,
 
@@ -1581,11 +1052,18 @@ i*70,
 
 }
 
-ctx.fillStyle="#ff592d";
+
+ctx.fillStyle = "#ff592d";
 
 ctx.fillRect(
 
-0,220,480,50
+0,
+
+220,
+
+480,
+
+50
 
 );
 
@@ -1606,11 +1084,12 @@ const platform of platforms
 
 ){
 
-let x=
+let x =
 
-platform.x-cameraX;
+platform.x - cameraX;
 
-ctx.fillStyle="#583a2b";
+
+ctx.fillStyle = "#583a2b";
 
 ctx.fillRect(
 
@@ -1624,7 +1103,8 @@ platform.h
 
 );
 
-ctx.fillStyle="#5fba55";
+
+ctx.fillStyle = "#5fba55";
 
 ctx.fillRect(
 
@@ -1657,11 +1137,12 @@ const coin of coins
 
 if(!coin.collected){
 
-let x=
+let x =
 
-coin.x-cameraX;
+coin.x - cameraX;
 
-ctx.fillStyle="#ffd83d";
+
+ctx.fillStyle = "#ffd83d";
 
 ctx.fillRect(
 
@@ -1675,13 +1156,14 @@ coin.y,
 
 );
 
-ctx.fillStyle="#fff5a3";
+
+ctx.fillStyle = "#fff5a3";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-coin.y+2,
+coin.y + 2,
 
 3,
 
@@ -1710,11 +1192,12 @@ const pizza of pizzas
 
 if(!pizza.collected){
 
-let x=
+let x =
 
-pizza.x-cameraX;
+pizza.x - cameraX;
 
-ctx.fillStyle="#d99032";
+
+ctx.fillStyle = "#d99032";
 
 ctx.fillRect(
 
@@ -1728,13 +1211,14 @@ pizza.y,
 
 );
 
-ctx.fillStyle="#ffe66d";
+
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-pizza.y+2,
+pizza.y + 2,
 
 12,
 
@@ -1742,13 +1226,14 @@ pizza.y+2,
 
 );
 
-ctx.fillStyle="#e5483e";
+
+ctx.fillStyle = "#e5483e";
 
 ctx.fillRect(
 
-x+5,
+x + 5,
 
-pizza.y+3,
+pizza.y + 3,
 
 3,
 
@@ -1775,11 +1260,14 @@ const enemy of enemies
 
 ){
 
-let x=
+if(enemy.dead) continue;
 
-enemy.x-cameraX;
+let x =
 
-ctx.fillStyle="#9b3aa3";
+enemy.x - cameraX;
+
+
+ctx.fillStyle = "#9b3aa3";
 
 ctx.fillRect(
 
@@ -1793,13 +1281,14 @@ enemy.y,
 
 );
 
-ctx.fillStyle="#ffe66d";
+
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-enemy.y+5,
+enemy.y + 5,
 
 4,
 
@@ -1807,11 +1296,12 @@ enemy.y+5,
 
 );
 
+
 ctx.fillRect(
 
-x+11,
+x + 11,
 
-enemy.y+5,
+enemy.y + 5,
 
 4,
 
@@ -1823,6 +1313,25 @@ enemy.y+5,
 
 }
 
+
+// =====================================================
+// LASERS + BOSS
+// =====================================================
+
+function drawCombat(){
+  for(const l of lasers){
+    const x=l.x-cameraX; ctx.fillStyle="#ff4040"; ctx.fillRect(x,l.y,Math.min(l.w,55),4);
+    ctx.fillStyle="#ffffff"; ctx.fillRect(x,l.y+1,Math.min(l.w,48),2);
+  }
+  if(boss.active&&!boss.defeated){
+    const x=boss.x-cameraX;
+    ctx.fillStyle="#7d1f2f"; ctx.fillRect(x,boss.y,boss.width,boss.height);
+    ctx.fillStyle="#ffcc33"; ctx.fillRect(x+8,boss.y+12,10,10); ctx.fillRect(x+40,boss.y+12,10,10);
+    ctx.fillStyle="#ef4444"; ctx.fillRect(x+10,boss.y-12,38,6);
+    ctx.fillStyle="#55ff55"; ctx.fillRect(x+10,boss.y-10,38*(boss.hp/boss.maxHp),3);
+    ctx.fillStyle="#fff"; ctx.font="10px monospace"; ctx.fillText("BOSS",x+12,boss.y+58);
+  }
+}
 
 // =====================================================
 // PLAYER
@@ -1830,24 +1339,27 @@ enemy.y+5,
 
 function drawPlayer(){
 
-let x=
+let x =
 
-player.x-cameraX;
+player.x - cameraX;
 
-let y=
+
+let y =
 
 player.y;
 
 
+// =====================================================
 // TAIL
+// =====================================================
 
-ctx.fillStyle="#765139";
+ctx.fillStyle = "#765139";
 
 ctx.fillRect(
 
-x-10,
+x - 10,
 
-y+10,
+y + 10,
 
 10,
 
@@ -1855,13 +1367,14 @@ y+10,
 
 );
 
-ctx.fillStyle="#ddd";
+
+ctx.fillStyle = "#dddddd";
 
 ctx.fillRect(
 
-x-10,
+x - 10,
 
-y+16,
+y + 16,
 
 10,
 
@@ -1870,15 +1383,17 @@ y+16,
 );
 
 
+// =====================================================
 // BODY
+// =====================================================
 
-ctx.fillStyle="#888";
+ctx.fillStyle = "#888888";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-y+9,
+y + 9,
 
 18,
 
@@ -1887,15 +1402,17 @@ y+9,
 );
 
 
+// =====================================================
 // BACKPACK
+// =====================================================
 
-ctx.fillStyle="#b96e35";
+ctx.fillStyle = "#b96e35";
 
 ctx.fillRect(
 
-x+14,
+x + 14,
 
-y+9,
+y + 9,
 
 10,
 
@@ -1903,13 +1420,14 @@ y+9,
 
 );
 
-ctx.fillStyle="#ffe36b";
+
+ctx.fillStyle = "#ffe36b";
 
 ctx.fillRect(
 
-x+17,
+x + 17,
 
-y+14,
+y + 14,
 
 4,
 
@@ -1918,13 +1436,15 @@ y+14,
 );
 
 
+// =====================================================
 // HEAD
+// =====================================================
 
-ctx.fillStyle="#999";
+ctx.fillStyle = "#999999";
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
 y,
 
@@ -1935,13 +1455,15 @@ y,
 );
 
 
+// =====================================================
 // EARS
+// =====================================================
 
 ctx.fillRect(
 
-x+2,
+x + 2,
 
-y-5,
+y - 5,
 
 7,
 
@@ -1951,9 +1473,9 @@ y-5,
 
 ctx.fillRect(
 
-x+17,
+x + 17,
 
-y-5,
+y - 5,
 
 7,
 
@@ -1962,15 +1484,17 @@ y-5,
 );
 
 
+// =====================================================
 // MASK
+// =====================================================
 
-ctx.fillStyle="#333";
+ctx.fillStyle = "#333333";
 
 ctx.fillRect(
 
-x+3,
+x + 3,
 
-y+5,
+y + 5,
 
 20,
 
@@ -1979,15 +1503,17 @@ y+5,
 );
 
 
+// =====================================================
 // EYES
+// =====================================================
 
-ctx.fillStyle="#ffe66d";
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x+7,
+x + 7,
 
-y+6,
+y + 6,
 
 4,
 
@@ -1997,9 +1523,9 @@ y+6,
 
 ctx.fillRect(
 
-x+16,
+x + 16,
 
-y+6,
+y + 6,
 
 4,
 
@@ -2008,15 +1534,17 @@ y+6,
 );
 
 
+// =====================================================
 // NOSE
+// =====================================================
 
-ctx.fillStyle="#222";
+ctx.fillStyle = "#222222";
 
 ctx.fillRect(
 
-x+12,
+x + 12,
 
-y+10,
+y + 10,
 
 4,
 
@@ -2025,15 +1553,17 @@ y+10,
 );
 
 
+// =====================================================
 // LEGS
+// =====================================================
 
-ctx.fillStyle="#666";
+ctx.fillStyle = "#666666";
 
 ctx.fillRect(
 
-x+5,
+x + 5,
 
-y+25,
+y + 25,
 
 5,
 
@@ -2043,9 +1573,9 @@ y+25,
 
 ctx.fillRect(
 
-x+15,
+x + 15,
 
-y+25,
+y + 25,
 
 5,
 
@@ -2054,17 +1584,19 @@ y+25,
 );
 
 
+// =====================================================
 // FLYING EFFECT
+// =====================================================
 
 if(flying){
 
-ctx.fillStyle="#ffe66d";
+ctx.fillStyle = "#ffe66d";
 
 ctx.fillRect(
 
-x-5,
+x - 5,
 
-y+7,
+y + 7,
 
 3,
 
@@ -2074,9 +1606,9 @@ y+7,
 
 ctx.fillRect(
 
-x+25,
+x + 25,
 
-y+7,
+y + 7,
 
 3,
 
@@ -2087,7 +1619,9 @@ y+7,
 }
 
 
+// =====================================================
 // LASER
+// =====================================================
 
 if(
 
@@ -2097,13 +1631,13 @@ input.jump
 
 ){
 
-ctx.fillStyle="#ff4040";
+ctx.fillStyle = "#ff4040";
 
 ctx.fillRect(
 
-x+24,
+x + 24,
 
-y+9,
+y + 9,
 
 55,
 
@@ -2111,13 +1645,14 @@ y+9,
 
 );
 
-ctx.fillStyle="#ffffff";
+
+ctx.fillStyle = "#ffffff";
 
 ctx.fillRect(
 
-x+27,
+x + 27,
 
-y+10,
+y + 10,
 
 48,
 
@@ -2136,25 +1671,44 @@ y+10,
 
 function drawStart(){
 
-ctx.fillStyle="#65c9ff";
+ctx.fillStyle = "#65c9ff";
 
 ctx.fillRect(
 
-0,0,480,270
+0,
+
+0,
+
+480,
+
+270
 
 );
 
-ctx.fillStyle="#ffe76a";
+
+// SUN
+
+ctx.fillStyle = "#ffe76a";
 
 ctx.fillRect(
 
-380,25,40,40
+380,
+
+25,
+
+40,
+
+40
 
 );
 
-ctx.fillStyle="#fff";
 
-ctx.font=
+// TITLE
+
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
 "bold 30px monospace";
 
 ctx.fillText(
@@ -2167,7 +1721,11 @@ ctx.fillText(
 
 );
 
-ctx.font=
+
+// SUBTITLE
+
+ctx.font =
+
 "14px monospace";
 
 ctx.fillText(
@@ -2180,33 +1738,73 @@ ctx.fillText(
 
 );
 
-ctx.font=
-"16px monospace";
 
-ctx.fillStyle="#ffe66d";
+// INSTRUCTION BOX
 
-ctx.fillText(
+ctx.fillStyle = "#101522";
 
-"PRESS JOYSTICK CENTER",
+ctx.fillRect(
 
-125,
+95,
 
-215
+145,
+
+290,
+
+70
 
 );
 
-ctx.font=
-"11px monospace";
 
-ctx.fillStyle="#fff";
+ctx.strokeStyle = "#ffe45c";
+
+ctx.lineWidth = 3;
+
+ctx.strokeRect(
+
+95,
+
+145,
+
+290,
+
+70
+
+);
+
+
+// START TEXT
+
+ctx.fillStyle = "#ffe66d";
+
+ctx.font =
+
+"bold 16px monospace";
 
 ctx.fillText(
 
-"D4 ALSO STARTS THE GAME",
+"PRESS D5 TO START",
 
-155,
+125,
 
-238
+180
+
+);
+
+
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
+"11px monospace";
+
+ctx.fillText(
+
+"CENTER JOYSTICK = LASER",
+
+165,
+
+200
 
 );
 
@@ -2219,13 +1817,14 @@ ctx.fillText(
 
 function draw(){
 
-if(state==="START"){
+if(state === "START"){
 
 drawStart();
 
 return;
 
 }
+
 
 drawBackground();
 
@@ -2237,12 +1836,17 @@ drawPizzas();
 
 drawEnemies();
 
+drawCombat();
+
 drawPlayer();
 
-ctx.fillStyle="#fff";
 
-ctx.font=
+ctx.fillStyle = "#ffffff";
+
+ctx.font =
+
 "12px monospace";
+
 
 ctx.fillText(
 
@@ -2258,7 +1862,7 @@ ctx.fillText(
 
 
 // =====================================================
-// MAIN LOOP
+// MAIN GAME LOOP
 // =====================================================
 
 function gameLoop(){
