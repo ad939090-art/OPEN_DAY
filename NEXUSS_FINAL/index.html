@@ -179,6 +179,25 @@ text-align:left;
 
 }
 
+
+#relayPanel{
+  position:fixed;
+  top:14px;
+  right:14px;
+  z-index:9999;
+  background:#101522;
+  border:2px solid #3d4d78;
+  border-radius:10px;
+  padding:10px 14px;
+  min-width:210px;
+  font-family:monospace;
+  font-size:13px;
+  box-shadow:0 0 18px #000;
+}
+#relayTitle{color:#ffe45c;font-weight:bold;margin-bottom:5px}
+#relayStatus{color:#ffcc66}
+#controllerStatus{color:#aaa;margin-top:3px}
+
 </style>
 
 </head>
@@ -186,6 +205,13 @@ text-align:left;
 
 <body>
 
+
+
+<div id="relayPanel">
+  <div id="relayTitle">NEXUS CONTROLLER</div>
+  <div id="relayStatus">● CONNECTING...</div>
+  <div id="controllerStatus">Waiting for ESP8266</div>
+</div>
 
 <div id="container">
 
@@ -439,17 +465,36 @@ catch(e){
 let relaySocket = null;
 let relayTimer = null;
 
+function setRelayStatus(text, color){
+  const el = document.getElementById("relayStatus");
+  if(el){
+    el.textContent = "● " + text;
+    el.style.color = color;
+  }
+}
+
+function setControllerStatus(text){
+  const el = document.getElementById("controllerStatus");
+  if(el) el.textContent = text;
+}
+
 function relayURL(){
   return (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/ws";
 }
 
 function connectRelay(){
   try{
+    setRelayStatus("CONNECTING...", "#ffcc66");
+    setControllerStatus("Connecting to Vercel relay");
+
     if(relaySocket) relaySocket.close();
     relaySocket = new WebSocket(relayURL());
 
     relaySocket.onopen = () => {
+      setRelayStatus("RELAY CONNECTED", "#55e6a5");
+      setControllerStatus("Waiting for ESP8266...");
       relaySocket.send(JSON.stringify({type:"controller_request"}));
+
       if(relayTimer) clearInterval(relayTimer);
       relayTimer = setInterval(() => {
         if(relaySocket && relaySocket.readyState === WebSocket.OPEN){
@@ -461,17 +506,36 @@ function connectRelay(){
     relaySocket.onmessage = (event) => {
       try{
         const msg = JSON.parse(event.data);
+
+        if(msg.type === "controller_status"){
+          if(msg.connected){
+            setControllerStatus("ESP8266 CONNECTED");
+          }else{
+            setControllerStatus("Waiting for ESP8266...");
+          }
+        }
+
         if(msg.type === "controller" && msg.data){
           input = msg.data;
+          setControllerStatus("ESP8266 CONNECTED");
         }
       }catch(e){}
     };
 
+    relaySocket.onerror = () => {
+      setRelayStatus("RELAY ERROR", "#ff6666");
+      setControllerStatus("Could not connect");
+    };
+
     relaySocket.onclose = () => {
       if(relayTimer){ clearInterval(relayTimer); relayTimer = null; }
+      setRelayStatus("DISCONNECTED", "#ff6666");
+      setControllerStatus("Retrying...");
       setTimeout(connectRelay, 2000);
     };
   }catch(e){
+    setRelayStatus("RELAY ERROR", "#ff6666");
+    setControllerStatus("Retrying...");
     setTimeout(connectRelay, 2000);
   }
 }
@@ -1975,4 +2039,3 @@ gameLoop();
 </body>
 
 </html>
-
