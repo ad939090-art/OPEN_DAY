@@ -37,6 +37,7 @@ canvas{display:block;width:100%;height:auto;margin-top:8px;border:5px solid #394
 const canvas=document.getElementById("game"); const ctx=canvas.getContext("2d"); ctx.imageSmoothingEnabled=false;
 let input={direction:"CENTER",jump:false,fly:false,reset:false,pause:false,center:false};
 let previous={jump:false,fly:false,reset:false,pause:false,center:false};
+let jumpQueued=false;
 let state="START",gameMode="EASY"; const EASY_SPEED=1.60,HARD_SPEED=1.80;
 let score=0,lives=3,pizzaCount=0,pizzasCollectedTotal=0,coinsCollected=0,distanceScore=0;
 let highScore=Number(localStorage.getItem("nexusHighScore")||0);
@@ -60,7 +61,10 @@ function connectRelay(){
     relaySocket.onmessage=function(event){
       try{
         const message=JSON.parse(event.data);
-        if(message.type==="controller"&&message.data) input=Object.assign({},input,message.data);
+        if(message.type==="controller"&&message.data){
+          if(message.data.jump===true && input.jump!==true) jumpQueued=true;
+          input=Object.assign({},input,message.data);
+        }
       }catch(error){console.error("Relay message error:",error)}
     };
     relaySocket.onclose=function(){relayReady=false;setTimeout(connectRelay,2000)};
@@ -72,6 +76,10 @@ connectRelay();
 /* CONTROLLER INPUT IS NOW PUSHED DIRECTLY BY THE ESP8266 */
 
 function pressed(button){return input[button]===true&&previous[button]!==true}
+function jumpPressed(){
+  if(jumpQueued){jumpQueued=false;return true;}
+  return pressed("jump");
+}
 function showMessage(title,text){let message=document.getElementById("message");message.innerHTML="<div class='messageTitle'>"+title+"</div><div class='messageText'>"+text+"</div>";message.style.display="block"}
 function hideMessage(){document.getElementById("message").style.display="none"}
 
@@ -112,13 +120,13 @@ function shootLaser(){if(state!=="PLAYING"||laserTime<=0)return;const now=perfor
 function update(){
  if(pressed("reset")){resetGame();previous=Object.assign({},input);return}
  if(pressed("center")){if(state!=="START"){state="START";hideMessage();player.x=45;player.y=100;player.vx=0;player.vy=0;flying=false;laserTime=0;lasers=[];bossLasers=[];lastBossShot=0;updateHUD()}previous=Object.assign({},input);return}
- if(state==="START"){if(pressed("jump")){gameMode=gameMode==="EASY"?"HARD":"EASY";beep(gameMode==="HARD"?850:500,0.08);updateHUD()}previous=Object.assign({},input);return}
+ if(state==="START"){if(jumpPressed()){gameMode=gameMode==="EASY"?"HARD":"EASY";beep(gameMode==="HARD"?850:500,0.08);updateHUD()}previous=Object.assign({},input);return}
  if(pressed("pause")){if(state==="PLAYING"){state="PAUSED";showMessage("GAME PAUSED","D6 PAUSE / RESUME")}else if(state==="PAUSED"){state="PLAYING";hideMessage()}previous=Object.assign({},input);return}
  if(state!=="PLAYING"){previous=Object.assign({},input);return}
  if(input.direction==="LEFT")player.vx=gameMode==="HARD"?-HARD_SPEED:-EASY_SPEED;else if(input.direction==="RIGHT")player.vx=gameMode==="HARD"?HARD_SPEED:EASY_SPEED;else player.vx*=0.78;
  if(pressed("fly")){if(laserTime>0)shootLaser();else if(flightUnlocked&&!flying){flying=true;flightTime=720;beep(850,0.1)}}
  if(flying){flightTime-=16;player.vy=-0.20;if(input.direction==="RIGHT")player.vx=gameMode==="HARD"?3.00:2.10;else if(input.direction==="LEFT")player.vx=gameMode==="HARD"?-3.00:-2.10;if(flightTime<=0){flying=false;flightTime=0;beep(250,0.1)}}else player.vy+=0.42;
- if(pressed("jump")&&player.onGround&&!flying){player.vy=-7.4;beep(500,0.08)}
+ if(jumpPressed()&&player.onGround&&!flying){player.vy=-7.4;beep(500,0.08)}
  player.x+=player.vx;player.y+=player.vy;if(player.x<0)player.x=0;player.onGround=false;
  if(!flying)for(const platform of platforms)if(player.x<platform.x+platform.w&&player.x+player.width>platform.x&&player.y+player.height>=platform.y&&player.y+player.height<=platform.y+18&&player.vy>=0){player.y=platform.y-player.height;player.vy=0;player.onGround=true}
  for(const coin of coins)if(!coin.collected&&collision(player,{x:coin.x,y:coin.y,width:12,height:12})){coin.collected=true;coinsCollected++;score+=25;beep(900,0.035)}
