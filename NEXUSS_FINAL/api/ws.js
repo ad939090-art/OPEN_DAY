@@ -1,127 +1,119 @@
-const { createServer } = require("http");
-const { WebSocketServer, WebSocket } = require("ws");
+import http from 'node:http';
+import { WebSocketServer, WebSocket } from 'ws';
 
-const server = createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/plain; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
+const server = http.createServer((req, res) => {
+  if (req.url === '/api/ws' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('NEXUS RACCOON WebSocket relay');
+    return;
+  }
 
-  res.end("NEXUS RACCOON WebSocket relay");
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not found');
 });
 
 const wss = new WebSocketServer({ server });
+const clients = new Set();
+const espClients = new Set();
 
-let esp8266 = null;
-const websites = new Set();
-
-function sendJSON(socket, data) {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(data));
+function sendJSON(ws, obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
   }
 }
 
-wss.on("connection", (socket) => {
-  socket.role = "unknown";
+function broadcastToBrowsers(obj) {
+  const msg = JSON.stringify(obj);
+  for (const ws of clients) {
+    if (!espClients.has(ws) && ws.readyState === WebSocket.OPEN) {
+      ws.send(msg);
+    }
+  }
+}
 
-  sendJSON(socket, {
-    type: "hello",
-    message: "NEXUS RACCOON relay connected",
+function sendToESP(obj) {
+  const msg = JSON.stringify(obj);
+  for (const ws of espClients) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(msg);
+    }
+  }
+}
+
+wss.on('connection', (ws, req) => {
+  clients.add(ws);
+  ws.isAlive = true;
+  ws.isESP = false;
+
+  console.log('WebSocket connected:', req.url);
+
+  sendJSON(ws, { type: 'relay_connected' });
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
   });
 
-  socket.on("message", (raw) => {
+  ws.on('message', (raw) => {
+    const text = raw.toString();
+    console.log('WS RX:', text);
+
     let msg;
-
     try {
-      msg = JSON.parse(raw.toString());
+      msg = JSON.parse(text);
     } catch {
+      sendJSON(ws, { type: 'error', message: 'Invalid JSON' });
       return;
     }
 
-    // ESP8266 registers itself with the relay
-    if (msg.type === "register_esp") {
-      if (esp8266 && esp8266 !== socket) {
-        try {
-          esp8266.close();
-        } catch {}
-      }
-
-      esp8266 = socket;
-      socket.role = "esp";
-
-      sendJSON(socket, {
-        type: "registered",
-        role: "esp",
-      });
-
-      // Tell all connected websites that ESP8266 is online
-      for (const website of websites) {
-        sendJSON(website, {
-          type: "controller_status",
-          connected: true,
-        });
-      }
-
+    if (msg.type === 'register_esp') {
+      ws.isESP = true;
+      espClients.add(ws);
+      sendJSON(ws, { type: 'register_ok' });
+      console.log('ESP registered. ESP count:', espClients.size);
       return;
     }
 
-    // Website asks the ESP8266 for controller data
-    if (msg.type === "controller_request") {
-      websites.add(socket);
-
-      if (
-        esp8266 &&
-        esp8266.readyState === WebSocket.OPEN
-      ) {
-        sendJSON(esp8266, {
-          type: "controller_request",
-        });
-      } else {
-        sendJSON(socket, {
-          type: "controller_status",
-          connected: false,
-        });
-      }
-
+    if (msg.type === 'controller_request') {
+      sendToESP(msg);
       return;
     }
 
-    // ESP8266 sends controller data to the website
-    if (
-      msg.type === "controller" &&
-      socket === esp8266
-    ) {
-      for (const website of websites) {
-        sendJSON(website, {
-          type: "controller",
-          data: msg.data || {},
-        });
-      }
+    if (msg.type === 'controller') {
+      broadcastToBrowsers(msg);
+      return;
+    }
+
+    // Allow a browser/client to send any game packet through the relay.
+    if (!ws.isESP) {
+      sendToESP(msg);
+    } else {
+      broadcastToBrowsers(msg);
     }
   });
 
-  socket.on("close", () => {
-    websites.delete(socket);
-
-    if (socket === esp8266) {
-      esp8266 = null;
-
-      for (const website of websites) {
-        sendJSON(website, {
-          type: "controller_status",
-          connected: false,
-        });
-      }
-    }
+  ws.on('close', () => {
+    clients.delete(ws);
+    espClients.delete(ws);
+    console.log('WebSocket closed. ESP count:', espClients.size);
   });
 
-  socket.on("error", () => {
-    websites.delete(socket);
-
-    if (socket === esp8266) {
-      esp8266 = null;
-    }
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err.message);
   });
 });
+
+// Keep idle connections alive and remove dead sockets.
+setInterval(() => {
+  for (const ws of clients) {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch {}
+  }
+}, 25000);
 
 export default server;
