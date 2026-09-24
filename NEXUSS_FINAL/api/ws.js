@@ -2,22 +2,15 @@ import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 
 const server = http.createServer((req, res) => {
-  // Normal HTTP test
-  if (req.url === "/api/ws" || req.url === "/") {
-    res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
-    });
-    res.end("NEXUS RACCOON WebSocket relay");
-    return;
-  }
+  res.writeHead(200, {
+    "Content-Type": "text/plain; charset=utf-8"
+  });
 
-  res.writeHead(404);
-  res.end("Not found");
+  res.end("NEXUS RACCOON WebSocket relay");
 });
 
 const wss = new WebSocketServer({
-  server,
-  clientTracking: true,
+  server
 });
 
 const clients = new Set();
@@ -30,42 +23,47 @@ function sendJSON(ws, data) {
 }
 
 function sendToESP(data) {
-  const msg = JSON.stringify(data);
+  const message = JSON.stringify(data);
 
   for (const ws of espClients) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(msg);
+      ws.send(message);
     }
   }
 }
 
-function broadcast(data) {
-  const msg = JSON.stringify(data);
+function sendToBrowsers(data) {
+  const message = JSON.stringify(data);
 
   for (const ws of clients) {
     if (
       !espClients.has(ws) &&
       ws.readyState === WebSocket.OPEN
     ) {
-      ws.send(msg);
+      ws.send(message);
     }
   }
 }
 
 wss.on("connection", (ws, req) => {
-  console.log("WS CONNECTED:", req.url);
+  console.log("=================================");
+  console.log("WEBSOCKET CONNECTED");
+  console.log("URL:", req.url);
+  console.log("=================================");
 
   clients.add(ws);
 
-  ws.isAlive = true;
   ws.isESP = false;
+  ws.isAlive = true;
 
   ws.on("pong", () => {
     ws.isAlive = true;
   });
 
-  ws.on("error", (err) => {
-    console.error("WS ERROR:", err.message);
+  // Tell every newly connected client that the relay is alive.
+  sendJSON(ws, {
+    type: "hello",
+    message: "NEXUS RACCOON relay connected"
   });
 
   ws.on("message", (raw) => {
@@ -77,58 +75,67 @@ wss.on("connection", (ws, req) => {
 
     try {
       msg = JSON.parse(text);
-    } catch {
+    } catch (err) {
       console.log("BAD JSON");
+
       sendJSON(ws, {
         type: "error",
-        message: "Invalid JSON",
+        message: "Invalid JSON"
       });
+
       return;
     }
 
-    // ESP announces itself
+    // ESP registers itself
     if (msg.type === "register_esp") {
       ws.isESP = true;
       espClients.add(ws);
 
       console.log(
-        "ESP REGISTERED. COUNT:",
+        "ESP REGISTERED. ESP COUNT:",
         espClients.size
       );
 
       sendJSON(ws, {
-        type: "register_ok",
+        type: "registered",
+        role: "esp"
       });
 
       return;
     }
 
-    // Browser asks ESP for controller state
+    // Browser asks ESP for controller data
     if (msg.type === "controller_request") {
+      console.log("CONTROLLER REQUEST FROM BROWSER");
+
       sendToESP(msg);
+
       return;
     }
 
-    // ESP sends controller state
+    // ESP sends controller data to browser
     if (msg.type === "controller") {
       console.log("CONTROLLER FROM ESP");
-      broadcast(msg);
+
+      sendToBrowsers(msg);
+
       return;
     }
 
-    // Other packets
+    // Other messages
     if (ws.isESP) {
-      broadcast(msg);
+      sendToBrowsers(msg);
     } else {
       sendToESP(msg);
     }
   });
 
   ws.on("close", (code, reason) => {
+    console.log("WEBSOCKET CLOSED");
+    console.log("CODE:", code);
     console.log(
-      "WS CLOSED:",
-      code,
-      reason?.toString() || ""
+      "REASON:",
+      reason ? reason.toString() : ""
     );
 
     clients.delete(ws);
@@ -140,16 +147,23 @@ wss.on("connection", (ws, req) => {
     );
   });
 
-  // IMPORTANT:
-  // Do NOT immediately send a relay_connected packet.
-  // Let the ESP send register_esp first.
+  ws.on("error", (err) => {
+    console.log(
+      "WEBSOCKET ERROR:",
+      err.message
+    );
+  });
 });
 
+// Keep connections alive.
 setInterval(() => {
   for (const ws of clients) {
+
     if (ws.isAlive === false) {
       console.log("TERMINATING DEAD SOCKET");
+
       ws.terminate();
+
       continue;
     }
 
@@ -158,7 +172,10 @@ setInterval(() => {
     try {
       ws.ping();
     } catch (err) {
-      console.error("PING ERROR:", err.message);
+      console.log(
+        "PING ERROR:",
+        err.message
+      );
     }
   }
 }, 20000);
