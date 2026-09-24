@@ -56,7 +56,6 @@ function connectRelay(){
     relaySocket.onopen=function(){
       relayReady=true;
       relaySocket.send(JSON.stringify({type:"register_browser"}));
-      relaySocket.send(JSON.stringify({type:"controller_request"}));
     };
     relaySocket.onmessage=function(event){
       try{
@@ -70,12 +69,7 @@ function connectRelay(){
 }
 connectRelay();
 
-/* FASTER CONTROLLER POLLING: 70ms -> 20ms */
-setInterval(function(){
-  if(relayReady&&relaySocket&&relaySocket.readyState===WebSocket.OPEN){
-    relaySocket.send(JSON.stringify({type:"controller_request"}));
-  }
-},20);
+/* CONTROLLER INPUT IS NOW PUSHED DIRECTLY BY THE ESP8266 */
 
 function pressed(button){return input[button]===true&&previous[button]!==true}
 function showMessage(title,text){let message=document.getElementById("message");message.innerHTML="<div class='messageTitle'>"+title+"</div><div class='messageText'>"+text+"</div>";message.style.display="block"}
