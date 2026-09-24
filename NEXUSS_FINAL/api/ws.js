@@ -124,4 +124,4 @@ wss.on("connection", (socket) => {
   });
 });
 
-module.exports = server;
+export default server;
