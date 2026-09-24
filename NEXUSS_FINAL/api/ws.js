@@ -2,165 +2,265 @@ import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 
 const server = http.createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/plain; charset=utf-8"
-  });
+  if (req.url === "/api/ws" || req.url === "/") {
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8"
+    });
 
-  res.end("NEXUS RACCOON WebSocket relay");
+    res.end("NEXUS RACCOON WebSocket relay");
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("Not found");
 });
 
 const wss = new WebSocketServer({
-  server
+  server,
+  clientTracking: true,
+  perMessageDeflate: false
 });
 
-const clients = new Set();
 const espClients = new Set();
-
-function sendJSON(ws, data) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
-  }
-}
-
-function sendToESP(data) {
-  const message = JSON.stringify(data);
-
-  for (const ws of espClients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(message);
-    }
-  }
-}
-
-function sendToBrowsers(data) {
-  const message = JSON.stringify(data);
-
-  for (const ws of clients) {
-    if (
-      !espClients.has(ws) &&
-      ws.readyState === WebSocket.OPEN
-    ) {
-      ws.send(message);
-    }
-  }
-}
+const browserClients = new Set();
 
 wss.on("connection", (ws, req) => {
-  console.log("=================================");
-  console.log("WEBSOCKET CONNECTED");
-  console.log("URL:", req.url);
-  console.log("=================================");
+  console.log("WebSocket connected:", req.url);
 
-  clients.add(ws);
-
-  ws.isESP = false;
   ws.isAlive = true;
+  ws.role = null;
+
+  // ---------------------------------------------------
+  // Initial connection message
+  // ---------------------------------------------------
+
+  ws.send(
+    JSON.stringify({
+      type: "hello",
+      message: "NEXUS RACCOON relay connected"
+    })
+  );
+
+  // ---------------------------------------------------
+  // Heartbeat
+  // ---------------------------------------------------
 
   ws.on("pong", () => {
     ws.isAlive = true;
   });
 
-  // Tell every newly connected client that the relay is alive.
-  sendJSON(ws, {
-    type: "hello",
-    message: "NEXUS RACCOON relay connected"
-  });
+  // ---------------------------------------------------
+  // Incoming messages
+  // ---------------------------------------------------
 
-  ws.on("message", (raw) => {
-    const text = raw.toString();
-
-    console.log("WS RX:", text);
-
-    let msg;
-
+  ws.on("message", (message) => {
     try {
-      msg = JSON.parse(text);
-    } catch (err) {
-      console.log("BAD JSON");
+      const text = message.toString();
 
-      sendJSON(ws, {
-        type: "error",
-        message: "Invalid JSON"
-      });
+      console.log("WS MESSAGE:", text);
 
-      return;
-    }
+      const data = JSON.parse(text);
 
-    // ESP registers itself
-    if (msg.type === "register_esp") {
-      ws.isESP = true;
-      espClients.add(ws);
+      // -------------------------------------------------
+      // ESP8266 registration
+      // -------------------------------------------------
 
-      console.log(
-        "ESP REGISTERED. ESP COUNT:",
-        espClients.size
+      if (data.type === "register_esp") {
+        ws.role = "esp";
+
+        espClients.add(ws);
+
+        ws.send(
+          JSON.stringify({
+            type: "registered",
+            role: "esp"
+          })
+        );
+
+        console.log(
+          "ESP registered. ESP count:",
+          espClients.size
+        );
+
+        return;
+      }
+
+      // -------------------------------------------------
+      // Browser registration
+      // -------------------------------------------------
+
+      if (data.type === "register_browser") {
+        ws.role = "browser";
+
+        browserClients.add(ws);
+
+        ws.send(
+          JSON.stringify({
+            type: "registered",
+            role: "browser"
+          })
+        );
+
+        console.log(
+          "Browser registered. Browser count:",
+          browserClients.size
+        );
+
+        // Ask ESP for current controller state
+        for (const esp of espClients) {
+          if (esp.readyState === WebSocket.OPEN) {
+            esp.send(
+              JSON.stringify({
+                type: "controller_request"
+              })
+            );
+          }
+        }
+
+        return;
+      }
+
+      // -------------------------------------------------
+      // ESP controller data
+      // -------------------------------------------------
+
+      if (data.type === "controller") {
+        console.log(
+          "CONTROLLER DATA:",
+          JSON.stringify(data)
+        );
+
+        for (const browser of browserClients) {
+          if (browser.readyState === WebSocket.OPEN) {
+            browser.send(
+              JSON.stringify(data)
+            );
+          }
+        }
+
+        return;
+      }
+
+      // -------------------------------------------------
+      // Browser asks for controller
+      // -------------------------------------------------
+
+      if (data.type === "controller_request") {
+        for (const esp of espClients) {
+          if (esp.readyState === WebSocket.OPEN) {
+            esp.send(
+              JSON.stringify({
+                type: "controller_request"
+              })
+            );
+          }
+        }
+
+        return;
+      }
+
+      // -------------------------------------------------
+      // Generic relay
+      // -------------------------------------------------
+
+      if (data.type === "broadcast") {
+        for (const client of wss.clients) {
+          if (
+            client !== ws &&
+            client.readyState === WebSocket.OPEN
+          ) {
+            client.send(
+              JSON.stringify(data.data ?? data)
+            );
+          }
+        }
+
+        return;
+      }
+
+    } catch (error) {
+      console.error(
+        "WS MESSAGE ERROR:",
+        error
       );
 
-      sendJSON(ws, {
-        type: "registered",
-        role: "esp"
-      });
-
-      return;
-    }
-
-    // Browser asks ESP for controller data
-    if (msg.type === "controller_request") {
-      console.log("CONTROLLER REQUEST FROM BROWSER");
-
-      sendToESP(msg);
-
-      return;
-    }
-
-    // ESP sends controller data to browser
-    if (msg.type === "controller") {
-      console.log("CONTROLLER FROM ESP");
-
-      sendToBrowsers(msg);
-
-      return;
-    }
-
-    // Other messages
-    if (ws.isESP) {
-      sendToBrowsers(msg);
-    } else {
-      sendToESP(msg);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            message: "Invalid JSON message"
+          })
+        );
+      }
     }
   });
+
+  // ---------------------------------------------------
+  // Error logging
+  // ---------------------------------------------------
+
+  ws.on("error", (error) => {
+    console.error(
+      "WebSocket client error:",
+      error
+    );
+  });
+
+  // ---------------------------------------------------
+  // Connection closed
+  // ---------------------------------------------------
 
   ws.on("close", (code, reason) => {
-    console.log("WEBSOCKET CLOSED");
-    console.log("CODE:", code);
+    const reasonText =
+      reason
+        ? reason.toString()
+        : "";
+
     console.log(
-      "REASON:",
-      reason ? reason.toString() : ""
+      "WebSocket closed.",
+      "Code:",
+      code,
+      "Reason:",
+      reasonText
     );
 
-    clients.delete(ws);
     espClients.delete(ws);
+    browserClients.delete(ws);
 
     console.log(
-      "ESP COUNT:",
+      "ESP count:",
       espClients.size
     );
-  });
 
-  ws.on("error", (err) => {
     console.log(
-      "WEBSOCKET ERROR:",
-      err.message
+      "Browser count:",
+      browserClients.size
     );
   });
 });
 
-// Keep connections alive.
-setInterval(() => {
-  for (const ws of clients) {
+// -----------------------------------------------------
+// Server errors
+// -----------------------------------------------------
+
+wss.on("error", (error) => {
+  console.error(
+    "WebSocketServer error:",
+    error
+  );
+});
+
+// -----------------------------------------------------
+// Heartbeat checker
+// -----------------------------------------------------
+
+const heartbeatInterval = setInterval(() => {
+  for (const ws of wss.clients) {
 
     if (ws.isAlive === false) {
-      console.log("TERMINATING DEAD SOCKET");
+      console.log(
+        "Terminating dead WebSocket"
+      );
 
       ws.terminate();
 
@@ -169,15 +269,22 @@ setInterval(() => {
 
     ws.isAlive = false;
 
-    try {
+    if (ws.readyState === WebSocket.OPEN) {
       ws.ping();
-    } catch (err) {
-      console.log(
-        "PING ERROR:",
-        err.message
-      );
     }
   }
-}, 20000);
+}, 30000);
+
+// -----------------------------------------------------
+// Cleanup
+// -----------------------------------------------------
+
+wss.on("close", () => {
+  clearInterval(heartbeatInterval);
+});
+
+// -----------------------------------------------------
+// Vercel / Node server
+// -----------------------------------------------------
 
 export default server;
