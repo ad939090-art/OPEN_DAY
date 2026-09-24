@@ -1,11 +1,13 @@
 const { createServer } = require("http");
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
 
 const server = createServer((req, res) => {
   res.writeHead(200, {
-    "Content-Type": "text/plain"
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
   });
-  res.end("NEXUS RACCOON WebSocket server is running.");
+
+  res.end("NEXUS RACCOON WebSocket relay");
 });
 
 const wss = new WebSocketServer({ server });
@@ -13,110 +15,112 @@ const wss = new WebSocketServer({ server });
 let esp8266 = null;
 const websites = new Set();
 
-function sendJSON(ws, data) {
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify(data));
+function sendJSON(socket, data) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(data));
   }
 }
 
-wss.on("connection", (ws) => {
-  let role = "unknown";
+wss.on("connection", (socket) => {
+  socket.role = "unknown";
 
-  console.log("WebSocket connected");
+  sendJSON(socket, {
+    type: "hello",
+    message: "NEXUS RACCOON relay connected",
+  });
 
-  ws.on("message", (raw) => {
+  socket.on("message", (raw) => {
     let msg;
 
     try {
       msg = JSON.parse(raw.toString());
-    } catch (err) {
-      console.log("Invalid JSON received");
+    } catch {
       return;
     }
 
-    // ESP8266 identifies itself
+    // ESP8266 registers itself with the relay
     if (msg.type === "register_esp") {
-      role = "esp";
-      esp8266 = ws;
+      if (esp8266 && esp8266 !== socket) {
+        try {
+          esp8266.close();
+        } catch {}
+      }
 
-      console.log("ESP8266 registered");
+      esp8266 = socket;
+      socket.role = "esp";
 
-      sendJSON(ws, {
-        type: "relay_status",
-        connected: true
+      sendJSON(socket, {
+        type: "registered",
+        role: "esp",
       });
 
-      // Tell all websites that the controller is online
-      for (const client of websites) {
-        sendJSON(client, {
+      // Tell all connected websites that ESP8266 is online
+      for (const website of websites) {
+        sendJSON(website, {
           type: "controller_status",
-          connected: true
+          connected: true,
         });
       }
 
       return;
     }
 
-    // Website identifies itself
+    // Website asks the ESP8266 for controller data
     if (msg.type === "controller_request") {
-      role = "website";
-      websites.add(ws);
+      websites.add(socket);
 
-      // Ask ESP8266 for the latest controller state
-      if (esp8266) {
+      if (
+        esp8266 &&
+        esp8266.readyState === WebSocket.OPEN
+      ) {
         sendJSON(esp8266, {
-          type: "controller_request"
+          type: "controller_request",
         });
       } else {
-        sendJSON(ws, {
+        sendJSON(socket, {
           type: "controller_status",
-          connected: false
+          connected: false,
         });
       }
 
       return;
     }
 
-    // ESP8266 sends controller data
-    if (msg.type === "controller" && role === "esp") {
-      for (const client of websites) {
-        sendJSON(client, msg);
-      }
-
-      return;
-    }
-
-    // Optional ping/pong
-    if (msg.type === "ping") {
-      sendJSON(ws, {
-        type: "pong"
-      });
-    }
-  });
-
-  ws.on("close", () => {
-    console.log("WebSocket disconnected");
-
-    if (role === "esp") {
-      if (esp8266 === ws) {
-        esp8266 = null;
-      }
-
-      for (const client of websites) {
-        sendJSON(client, {
-          type: "controller_status",
-          connected: false
+    // ESP8266 sends controller data to the website
+    if (
+      msg.type === "controller" &&
+      socket === esp8266
+    ) {
+      for (const website of websites) {
+        sendJSON(website, {
+          type: "controller",
+          data: msg.data || {},
         });
       }
     }
+  });
 
-    if (role === "website") {
-      websites.delete(ws);
+  socket.on("close", () => {
+    websites.delete(socket);
+
+    if (socket === esp8266) {
+      esp8266 = null;
+
+      for (const website of websites) {
+        sendJSON(website, {
+          type: "controller_status",
+          connected: false,
+        });
+      }
     }
   });
 
-  ws.on("error", (err) => {
-    console.log("WebSocket error:", err.message);
+  socket.on("error", () => {
+    websites.delete(socket);
+
+    if (socket === esp8266) {
+      esp8266 = null;
+    }
   });
 });
 
