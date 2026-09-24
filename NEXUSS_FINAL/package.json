@@ -1,14 +1,8 @@
 {
   "name": "nexus-raccoon-relay",
-  "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "start": "node index.js"
-  },
+  "type": "module",
   "dependencies": {
-    "ws": "^8.18.0"
-  },
-  "engines": {
-    "node": ">=18"
+    "ws": "^8.18.3"
   }
 }
