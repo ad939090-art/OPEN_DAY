@@ -1,30 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NEXUS RACCOON</title>
 </head>
 <body>
-  <!-- Use the NEXUS RACCOON website code here.
-       Controller endpoint must be:
-       http://10.65.179.97/controller
-  -->
 
-  <script>
-    const ESP8266_URL = "http://10.65.179.97";
+<!-- Use the complete NEXUS RACCOON game code from the generated hosting file.
+     The controller connection is configured for:
+     http://10.65.179.97/controller
+-->
 
-    async function getController() {
-      try {
-        const response = await fetch(
-          ESP8266_URL + "/controller?time=" + Date.now()
-        );
-        return await response.json();
-      } catch (error) {
-        console.log("ESP8266 disconnected");
-        return null;
-      }
-    }
-  </script>
+<script>
+const ESP8266_URL = "http://10.65.179.97";
+
+async function getController() {
+  try {
+    const response = await fetch(
+      ESP8266_URL + "/controller?time=" + Date.now(),
+      { cache: "no-store" }
+    );
+    return await response.json();
+  } catch (e) {
+    return null;
+  }
+}
+</script>
+
 </body>
 </html>
